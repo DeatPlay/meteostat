@@ -2,214 +2,195 @@
 <html lang="cs">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Čtečka váhy</title>
-  <!-- Tesseract.js načtený z CDN -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skenování váhy z fotky</title>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
-    body { background: #121212; color: #fff; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: #121212; color: #fff; padding: 20px; display: flex; flex-direction: column; gap: 16px; min-height: 100vh; }
     
-    #camera-container {
-      position: relative;
-      flex: 1;
+    .card { background: #1e1e1e; border: 1px solid #333; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    
+    /* Skrytý standardní input, nahrazený velkým tlačítkem */
+    #fileInput { display: none; }
+    .btn-camera {
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #000;
-      overflow: hidden;
-    }
-
-    video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-
-    /* Zaměřovací rámeček na displej váhy */
-    .roi-box {
-      position: absolute;
-      width: 240px;
-      height: 90px;
-      border: 3px solid #00ff88;
-      border-radius: 8px;
-      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
-      pointer-events: none;
-    }
-
-    .roi-box::before {
-      content: 'Namiř na displej';
-      position: absolute;
-      top: -24px;
-      left: 0;
-      font-size: 13px;
-      color: #00ff88;
-      font-weight: 600;
-    }
-
-    /* Panel s výsledkem */
-    #control-panel {
+      gap: 10px;
+      background: #00ff88;
+      color: #000;
+      font-weight: 700;
+      font-size: 18px;
       padding: 16px;
-      background: #1e1e1e;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      text-align: center;
     }
 
-    .output-group {
+    .output-box {
       display: flex;
       align-items: center;
-      gap: 10px;
+      justify-content: center;
+      gap: 8px;
     }
 
     input[type="text"] {
-      flex: 1;
+      width: 100%;
+      max-width: 200px;
       padding: 12px;
-      font-size: 24px;
-      font-weight: bold;
+      font-size: 32px;
+      font-weight: 800;
       text-align: center;
       background: #2a2a2a;
       border: 1px solid #444;
-      border-radius: 6px;
+      border-radius: 8px;
       color: #00ff88;
     }
 
-    .status {
-      font-size: 12px;
-      color: #aaa;
-      text-align: center;
+    /* Náhled zpracování */
+    canvas {
+      width: 100%;
+      max-height: 250px;
+      object-fit: contain;
+      background: #000;
+      border-radius: 8px;
+      border: 1px solid #444;
     }
 
-    /* Skrytý canvas pro předzpracování */
-    #cropCanvas { display: none; }
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      color: #aaa;
+    }
+
+    input[type="range"] { width: 100%; accent-color: #00ff88; }
+    .status { text-align: center; font-size: 14px; color: #aaa; }
   </style>
 </head>
 <body>
 
-  <div id="camera-container">
-    <video id="video" playsinline autoplay muted></video>
-    <div class="roi-box" id="roi"></div>
-  </div>
+  <label for="fileInput" class="btn-camera">
+    📷 Vyfotit displej váhy
+  </label>
+  <input type="file" id="fileInput" accept="image/*" capture="environment">
 
-  <div id="control-panel">
-    <div class="output-group">
-      <input type="text" id="weightInput" placeholder="0" readonly>
-      <span style="font-size: 20px; font-weight: bold;">g</span>
+  <div class="card">
+    <div class="status" id="statusText">Připraveno. Vyfoť displej co nejblíže a rovně.</div>
+    <div class="output-box">
+      <input type="text" id="weightVal" placeholder="---" readonly>
+      <span style="font-size: 24px; font-weight: bold;">g</span>
     </div>
-    <div class="status" id="statusText">Inicializace...</div>
   </div>
 
-  <canvas id="cropCanvas"></canvas>
+  <div class="card">
+    <div class="controls">
+      <label for="thresholdSlider">Filtr kontrastu (práh): <span id="threshVal">128</span></label>
+      <input type="range" id="thresholdSlider" min="30" max="220" value="128">
+    </div>
+    <canvas id="previewCanvas"></canvas>
+    <div class="status" style="font-size: 12px;">Výše vidíš obraz, jak ho vidí OCR engine. Čísla musí být čistě černá na bílém podkladu (nebo naopak bez šedých fleků).</div>
+  </div>
 
   <script>
-    const video = document.getElementById('video');
-    const roi = document.getElementById('roi');
-    const canvas = document.getElementById('cropCanvas');
+    const fileInput = document.getElementById('fileInput');
+    const canvas = document.getElementById('previewCanvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    const weightInput = document.getElementById('weightInput');
+    const weightVal = document.getElementById('weightVal');
     const statusText = document.getElementById('statusText');
+    const thresholdSlider = document.getElementById('thresholdSlider');
+    const threshVal = document.getElementById('threshVal');
 
+    let loadedImage = null;
     let worker = null;
-    let isProcessing = false;
 
-    // 1. Spuštění zadní kamery
-    async function initCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          audio: false
-        });
-        video.srcObject = stream;
-        await video.play();
+    // 1. Inicializace Tesseractu na pozadí
+    async function getWorker() {
+      if (!worker) {
         statusText.innerText = "Načítám OCR model...";
-        initOCR();
-      } catch (err) {
-        statusText.innerText = "Chyba kamery: " + err.message;
-      }
-    }
-
-    // 2. Inicializace Tesseract Workeru (nastavený jen na číslice)
-    async function initOCR() {
-      try {
         worker = await Tesseract.createWorker('eng');
         await worker.setParameters({
-          tessedit_char_whitelist: '0123456789.-', // Ignoruje písmena, hledá jen čísla a tečky
-          tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE // Očekáváme jeden řádek textu
+          tessedit_char_whitelist: '0123456789.-',
+          tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE
         });
-        statusText.innerText = "Skenuji...";
-        startScanningLoop();
-      } catch (err) {
-        statusText.innerText = "Chyba OCR: " + err.message;
       }
+      return worker;
     }
 
-    // 3. Oříznutí a prahování výřezu na černobílou
-    function captureAndPreprocess() {
-      const vWidth = video.videoWidth;
-      const vHeight = video.videoHeight;
-      const cRect = video.getBoundingClientRect();
-      const rRect = roi.getBoundingClientRect();
+    // 2. Načtení fotky z nativního foťáku
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
 
-      // Přepočet souřadnic rámečku na reálné rozlišení videa
-      const scaleX = vWidth / cRect.width;
-      const scaleY = vHeight / cRect.height;
+      statusText.innerText = "Zpracovávám fotku...";
+      const img = new Image();
+      img.onload = () => {
+        loadedImage = img;
+        runProcessingAndOCR();
+      };
+      img.src = URL.createObjectURL(file);
+    });
 
-      const sx = (rRect.left - cRect.left) * scaleX;
-      const sy = (rRect.top - cRect.top) * scaleY;
-      const sWidth = rRect.width * scaleX;
-      const sHeight = rRect.height * scaleY;
+    // 3. Úprava kontrastu / Prahování
+    function preprocess(threshold) {
+      if (!loadedImage) return;
 
-      canvas.width = rRect.width;
-      canvas.height = rRect.height;
+      // Zmenšíme příliš velkou fotku z mobilu (např. 4000px -> 800px šířka pro rychlost)
+      const scale = Math.min(1, 800 / loadedImage.width);
+      canvas.width = loadedImage.width * scale;
+      canvas.height = loadedImage.height * scale;
 
-      // Vykreslení oříznutého výřezu
-      ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(loadedImage, 0, 0, canvas.width, canvas.height);
 
-      // Binarizace: Převod na tvrdou černobílou (odstraní stíny a odlesky váhy)
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imgData.data;
-      const threshold = 110; // Práh pro LCD: tmavé segmenty vs světlé pozadí
+      const d = imgData.data;
 
-      for (let i = 0; i < data.length; i += 4) {
-        const avg = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
-        // Pokud je displej tmavý se svítícími čísly, obrať nerovnost (> threshold)
-        const val = avg < threshold ? 0 : 255;
-        data[i] = val;
-        data[i + 1] = val;
-        data[i + 2] = val;
+      // Binarizace: černá vs bílá
+      for (let i = 0; i < d.length; i += 4) {
+        const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const val = gray < threshold ? 0 : 255;
+        d[i] = val;
+        d[i + 1] = val;
+        d[i + 2] = val;
       }
       ctx.putImageData(imgData, 0, 0);
     }
 
-    // 4. Neustálá smyčka snímání
-    function startScanningLoop() {
-      setInterval(async () => {
-        if (isProcessing || !worker || video.readyState !== 4) return;
+    // 4. Samotné OCR čtení
+    async function runProcessingAndOCR() {
+      const threshold = parseInt(thresholdSlider.value);
+      threshVal.innerText = threshold;
 
-        isProcessing = true;
-        captureAndPreprocess();
+      preprocess(threshold);
+      statusText.innerText = "Rozpoznávám číslice...";
 
-        try {
-          const { data: { text } } = await worker.recognize(canvas);
-          const cleanVal = text.replace(/[^0-9.-]/g, '').trim();
+      try {
+        const ocr = await getWorker();
+        const { data: { text } } = await ocr.recognize(canvas);
+        const clean = text.replace(/[^0-9.-]/g, '').trim();
 
-          if (cleanVal.length > 0 && !isNaN(cleanVal)) {
-            weightInput.value = cleanVal;
-            statusText.innerText = "Úspěšně přečteno";
-          }
-        } catch (e) {
-          console.error(e);
-        } finally {
-          isProcessing = false;
+        if (clean) {
+          weightVal.value = clean;
+          statusText.innerText = "Úspěšně rozpoznáno!";
+        } else {
+          statusText.innerText = "Číslo nenalezeno. Zkus posunout posuvník filtru.";
         }
-      }, 400); // Kontrola každých 400 ms
+      } catch (err) {
+        statusText.innerText = "Chyba: " + err.message;
+      }
     }
 
-    window.addEventListener('load', initCamera);
+    // Změna posuvníku okamžitě přepočítá filtr i OCR
+    thresholdSlider.addEventListener('input', () => {
+      threshVal.innerText = thresholdSlider.value;
+      preprocess(parseInt(thresholdSlider.value));
+    });
+
+    thresholdSlider.addEventListener('change', () => {
+      runProcessingAndOCR();
+    });
   </script>
 </body>
 </html>
