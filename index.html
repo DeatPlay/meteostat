@@ -2,896 +2,214 @@
 <html lang="cs">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>Kreuzspitze Tactical Alpine Ops 3457m</title>
-
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Chart.js CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- Lucide ikony -->
-  <script src="https://unpkg.com/lucide@latest"></script>
-  
-  <!-- Leaflet CSS & JS pro radarovou mapu -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Čtečka váhy</title>
+  <!-- Tesseract.js načtený z CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
-      -webkit-tap-highlight-color: transparent;
-      user-select: none;
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+    body { background: #121212; color: #fff; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+    
+    #camera-container {
+      position: relative;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      overflow: hidden;
     }
 
-    /* iOS Liquid Glass Card */
-    .liquid-glass {
-      background: rgba(255, 255, 255, 0.74);
-      backdrop-filter: blur(28px) saturate(190%);
-      -webkit-backdrop-filter: blur(28px) saturate(190%);
-      border: 1px solid rgba(255, 255, 255, 0.85);
-      box-shadow: 
-        0 10px 30px -5px rgba(0, 0, 0, 0.04),
-        0 20px 25px -5px rgba(100, 116, 139, 0.06),
-        inset 0 1px 1px 0 rgba(255, 255, 255, 0.9),
-        inset 0 -1px 2px 0 rgba(0, 0, 0, 0.02);
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
 
-    .liquid-pill {
-      background: rgba(255, 255, 255, 0.75);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.95);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02), inset 0 1px 1px rgba(255, 255, 255, 1);
+    /* Zaměřovací rámeček na displej váhy */
+    .roi-box {
+      position: absolute;
+      width: 240px;
+      height: 90px;
+      border: 3px solid #00ff88;
+      border-radius: 8px;
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+      pointer-events: none;
     }
 
-    .btn-glass {
-      background: rgba(255, 255, 255, 0.85);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.95);
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
-      transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-    .btn-glass:active {
-      transform: scale(0.92);
-      background: rgba(240, 243, 246, 0.9);
+    .roi-box::before {
+      content: 'Namiř na displej';
+      position: absolute;
+      top: -24px;
+      left: 0;
+      font-size: 13px;
+      color: #00ff88;
+      font-weight: 600;
     }
 
-    .critical-alarm {
-      background: rgba(254, 226, 226, 0.9) !important;
-      border: 2.5px solid rgba(220, 38, 38, 1) !important;
-      box-shadow: 0 0 35px rgba(239, 68, 68, 0.6), inset 0 0 15px rgba(239, 68, 68, 0.2) !important;
-      animation: alertPulse 1s ease-in-out infinite !important;
+    /* Panel s výsledkem */
+    #control-panel {
+      padding: 16px;
+      background: #1e1e1e;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
 
-    @keyframes alertPulse {
-      0%, 100% {
-        box-shadow: 0 0 20px rgba(239, 68, 68, 0.4), inset 0 0 10px rgba(239, 68, 68, 0.1);
-        border-color: rgba(239, 68, 68, 0.7);
-      }
-      50% {
-        box-shadow: 0 0 45px rgba(239, 68, 68, 0.9), inset 0 0 25px rgba(239, 68, 68, 0.35);
-        border-color: rgba(220, 38, 38, 1);
-      }
+    .output-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
-    @keyframes flashStrobe {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.2; transform: scale(0.98); }
-    }
-    .strobe-fast {
-      animation: flashStrobe 0.7s infinite;
+    input[type="text"] {
+      flex: 1;
+      padding: 12px;
+      font-size: 24px;
+      font-weight: bold;
+      text-align: center;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #00ff88;
     }
 
-    #radar-map {
-      border-radius: 1.25rem;
-      z-index: 10;
+    .status {
+      font-size: 12px;
+      color: #aaa;
+      text-align: center;
     }
 
-    .pt-safe { padding-top: max(env(safe-area-inset-top), 0.85rem); }
-    .pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 1.25rem); }
+    /* Skrytý canvas pro předzpracování */
+    #cropCanvas { display: none; }
   </style>
 </head>
+<body>
 
-<body id="app-body" class="bg-[#F2F4F8] text-slate-850 min-h-screen flex justify-center antialiased overflow-x-hidden relative transition-colors duration-500">
-
-  <!-- Ambientní dynamické pozadí -->
-  <div id="ambient-bg" class="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-all duration-700">
-    <div id="blob-1" class="absolute -top-24 -left-20 w-80 h-80 bg-sky-200/50 rounded-full blur-3xl"></div>
-    <div id="blob-2" class="absolute top-1/3 -right-24 w-88 h-88 bg-amber-100/60 rounded-full blur-3xl"></div>
-    <div id="blob-3" class="absolute bottom-12 left-0 w-72 h-72 bg-emerald-100/40 rounded-full blur-3xl"></div>
+  <div id="camera-container">
+    <video id="video" playsinline autoplay muted></video>
+    <div class="roi-box" id="roi"></div>
   </div>
 
-  <!-- Mobilní kontejner -->
-  <div class="w-full max-w-[430px] min-h-screen flex flex-col justify-between px-3.5 pt-safe pb-safe relative z-10 space-y-3">
-
-    <!-- Header -->
-    <header class="liquid-glass rounded-3xl px-4 py-3 flex items-center justify-between">
-      <div class="flex items-center gap-2.5">
-        <div id="header-icon-box" class="w-9 h-9 rounded-2xl liquid-pill flex items-center justify-center text-sky-600 shadow-sm transition-colors">
-          <i data-lucide="mountain-snow" class="w-5 h-5"></i>
-        </div>
-        <div>
-          <h1 class="text-sm font-semibold text-slate-900 tracking-tight leading-tight">Kreuzspitze Ops</h1>
-          <span class="text-[11px] font-medium text-slate-500">Vent (1895m) ➔ Vrchol (3457m)</span>
-        </div>
-      </div>
-      
-      <div class="flex items-center gap-1.5">
-        <span id="sync-badge" class="text-[10px] font-semibold text-slate-500 liquid-pill px-2.5 py-1 rounded-full">Offline</span>
-        <button id="refresh-btn" onclick="fetchAlpineData()" class="btn-glass w-9 h-9 rounded-2xl flex items-center justify-center text-slate-700">
-          <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-        </button>
-      </div>
-    </header>
-
-    <!-- Dynamický 5denní přepínač dnů -->
-    <section id="day-picker" class="liquid-glass rounded-3xl p-1.5 flex items-center justify-between gap-1 overflow-x-auto">
-      <!-- Generováno JS -->
-    </section>
-
-    <!-- Stroboskopický Krizový Alarm Banner (DEFCON 1) -->
-    <section id="critical-strobe-alert" class="hidden rounded-3xl p-3.5 bg-red-600 text-white shadow-2xl shadow-red-600/60 transition-all">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2 strobe-fast">
-          <i data-lucide="siren" class="w-6 h-6 text-white animate-spin"></i>
-          <div>
-            <h2 class="text-xs font-black tracking-wider uppercase">DEFCON 1: ŽIVOTU NEBEZPEČNÉ</h2>
-            <p class="text-[10px] text-red-100 font-medium">Extrémní blesková aktivita / vítr na hřebeni</p>
-          </div>
-        </div>
-        <button onclick="playAlarmBeep()" class="px-2.5 py-1 rounded-xl bg-white text-red-600 font-bold text-[10px] shadow-sm active:scale-95">
-          Zvuk
-        </button>
-      </div>
-    </section>
-
-    <!-- Taktický panel stavu / Turnaround Window -->
-    <section id="risk-card" class="liquid-glass rounded-3xl p-4 transition-all duration-300">
-      <div class="flex items-start justify-between gap-3">
-        <div class="space-y-1.5">
-          <div class="flex items-center gap-2">
-            <span id="risk-dot" class="w-3 h-3 rounded-full bg-slate-400"></span>
-            <span id="risk-label" class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Načítám modely...</span>
-          </div>
-          <p id="risk-summary" class="text-xs text-slate-600 font-medium leading-relaxed">
-            Stahuji data z meteorologických radarů a numerických modelů...
-          </p>
-        </div>
-        <button onclick="openInfoModal('tactical')" class="text-slate-400 hover:text-slate-600 p-1 shrink-0">
-          <i data-lucide="info" class="w-4 h-4"></i>
-        </button>
-      </div>
-    </section>
-
-    <!-- ŽIVÝ METEOROLOGICKÝ A BOUŘKOVÝ RADAR (RainViewer Live) -->
-    <section class="liquid-glass rounded-3xl p-3.5 space-y-2.5">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-1.5">
-          <i data-lucide="radar" class="w-4 h-4 text-sky-600 animate-pulse"></i>
-          <span class="text-xs font-bold text-slate-800">Živý radar bouřek & srážek</span>
-        </div>
-        <div class="flex items-center gap-1">
-          <button onclick="toggleRadarType('radar')" id="btn-type-radar" class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-sky-600 text-white">Radar</button>
-          <button onclick="toggleRadarType('satellite')" id="btn-type-sat" class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-200 text-slate-700">Satelit</button>
-        </div>
-      </div>
-
-      <!-- Mapa -->
-      <div id="radar-map" class="w-full h-56 rounded-2xl shadow-inner border border-slate-200/60 relative overflow-hidden">
-        <!-- Vodící vrstva s časem v rohu mapy -->
-        <div class="absolute top-2 left-2 z-[400] liquid-pill px-2 py-0.5 rounded-lg text-[10px] font-bold text-slate-700">
-          <span id="radar-timestamp">Načítám radar...</span>
-        </div>
-      </div>
-
-      <!-- Ovládání přehrávání radaru -->
-      <div class="flex items-center justify-between px-1">
-        <button onclick="toggleRadarPlay()" id="radar-play-btn" class="btn-glass px-3 py-1 rounded-xl text-[10px] font-bold text-slate-700 flex items-center gap-1">
-          <i data-lucide="play" id="radar-play-icon" class="w-3 h-3"></i>
-          <span id="radar-play-text">Animace</span>
-        </button>
-        
-        <!-- Radarová legenda stupnice intenzity -->
-        <div class="flex items-center gap-1 text-[9px] font-medium text-slate-500">
-          <span class="w-2.5 h-2 rounded bg-[#00e400]"></span>
-          <span class="w-2.5 h-2 rounded bg-[#ffff00]"></span>
-          <span class="w-2.5 h-2 rounded bg-[#ff7e00]"></span>
-          <span class="w-2.5 h-2 rounded bg-[#ff0000]"></span>
-          <span class="w-2.5 h-2 rounded bg-[#99004c]"></span>
-          <span class="text-[9px] ml-0.5 font-bold text-slate-600">dBZ / Blesky</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- Multi-Model Consensus Card (3 Modely vedle sebe) -->
-    <section class="liquid-glass rounded-3xl p-3.5 space-y-2.5">
-      <div class="flex items-center justify-between border-b border-slate-200/50 pb-1.5">
-        <div class="flex items-center gap-1.5">
-          <i data-lucide="layers" class="w-4 h-4 text-indigo-600"></i>
-          <span class="text-xs font-bold text-slate-800">Konsenzus 3 modelů pro vybraný den</span>
-        </div>
-        <button onclick="openInfoModal('models')" class="text-slate-400 hover:text-slate-600">
-          <i data-lucide="info" class="w-3.5 h-3.5"></i>
-        </button>
-      </div>
-
-      <div class="grid grid-cols-3 gap-2 text-center">
-        <!-- ICON-D2 -->
-        <div class="liquid-pill p-2 rounded-2xl border-b-2 border-sky-500">
-          <span class="text-[9px] font-bold text-sky-700 block uppercase">ICON-D2 (2.2km)</span>
-          <span id="model-icon-temp" class="text-xs font-bold text-slate-800 block mt-0.5">-- °C</span>
-          <span id="model-icon-wind" class="text-[10px] font-semibold text-slate-600 block">-- km/h</span>
-          <span id="model-icon-cape" class="text-[9px] font-bold text-amber-600 block mt-0.5">CAPE --</span>
-        </div>
-        <!-- AROME -->
-        <div class="liquid-pill p-2 rounded-2xl border-b-2 border-purple-500">
-          <span class="text-[9px] font-bold text-purple-700 block uppercase">AROME (2.5km)</span>
-          <span id="model-arome-temp" class="text-xs font-bold text-slate-800 block mt-0.5">-- °C</span>
-          <span id="model-arome-wind" class="text-[10px] font-semibold text-slate-600 block">-- km/h</span>
-          <span id="model-arome-cape" class="text-[9px] font-bold text-amber-600 block mt-0.5">CAPE --</span>
-        </div>
-        <!-- ECMWF -->
-        <div class="liquid-pill p-2 rounded-2xl border-b-2 border-emerald-500">
-          <span class="text-[9px] font-bold text-emerald-700 block uppercase">ECMWF (9km)</span>
-          <span id="model-ecm-temp" class="text-xs font-bold text-slate-800 block mt-0.5">-- °C</span>
-          <span id="model-ecm-wind" class="text-[10px] font-semibold text-slate-600 block">-- km/h</span>
-          <span id="model-ecm-cape" class="text-[9px] font-bold text-amber-600 block mt-0.5">CAPE --</span>
-        </div>
-      </div>
-      <div id="model-agreement-text" class="text-[10px] text-center font-semibold text-slate-500 pt-0.5">
-        Vyhodnocuji shodu předpovědních modelů...
-      </div>
-    </section>
-
-    <!-- Graf 1: Teploty napříč modely -->
-    <section class="liquid-glass rounded-3xl p-4 space-y-2">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-1.5">
-          <i data-lucide="thermometer" class="w-4 h-4 text-sky-500"></i>
-          <span class="text-xs font-bold text-slate-700">Teplota (°C): Všechny 3 modely</span>
-        </div>
-        <span class="text-[9px] font-semibold text-slate-400">Modrá: ICON | Fialová: AROME | Zelená: ECMWF</span>
-      </div>
-      <div class="h-36 w-full">
-        <canvas id="multiTempChart"></canvas>
-      </div>
-    </section>
-
-    <!-- Graf 2: Nárazy větru napříč modely -->
-    <section class="liquid-glass rounded-3xl p-4 space-y-2">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-1.5">
-          <i data-lucide="wind" class="w-4 h-4 text-teal-600"></i>
-          <span class="text-xs font-bold text-slate-700">Nárazy větru (km/h): Všechny 3 modely</span>
-        </div>
-        <button onclick="openInfoModal('wind')" class="text-slate-400 hover:text-slate-600">
-          <i data-lucide="info" class="w-3.5 h-3.5"></i>
-        </button>
-      </div>
-      <div class="h-36 w-full">
-        <canvas id="multiWindChart"></canvas>
-      </div>
-    </section>
-
-    <!-- Graf 3: CAPE & Srážky -->
-    <section class="liquid-glass rounded-3xl p-4 space-y-2">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-1.5">
-          <i data-lucide="cloud-lightning" class="w-4 h-4 text-amber-500"></i>
-          <span class="text-xs font-bold text-slate-700">Bouřky (CAPE J/kg) & Déšť (%): Modely</span>
-        </div>
-        <button onclick="openInfoModal('cape')" class="text-slate-400 hover:text-slate-600">
-          <i data-lucide="info" class="w-3.5 h-3.5"></i>
-        </button>
-      </div>
-      <div class="h-36 w-full">
-        <canvas id="multiCapeChart"></canvas>
-      </div>
-    </section>
-
-    <!-- Footer -->
-    <footer class="text-center pt-1 pb-1">
-      <p class="text-[10px] font-semibold text-slate-400 tracking-wide">
-        Záchytný bod: Martin-Busch-Hütte (2 501m) • Live Radar & 5denní výhled
-      </p>
-    </footer>
-
-  </div>
-
-  <!-- iOS Info Modal -->
-  <div id="info-modal" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 hidden opacity-0 transition-opacity duration-300">
-    <div id="modal-container" class="liquid-glass w-full max-w-[430px] rounded-t-3xl sm:rounded-3xl p-5 space-y-4 transform translate-y-full transition-transform duration-300 max-h-[85vh] overflow-y-auto">
-      <div class="flex items-center justify-between border-b border-slate-200/60 pb-3">
-        <div class="flex items-center gap-2">
-          <div class="w-8 h-8 rounded-xl liquid-pill flex items-center justify-center text-sky-600">
-            <i data-lucide="info" class="w-4 h-4"></i>
-          </div>
-          <h3 id="modal-title" class="font-bold text-sm text-slate-800">Vysvětlivka</h3>
-        </div>
-        <button onclick="closeInfoModal()" class="w-8 h-8 rounded-full liquid-pill flex items-center justify-center text-slate-500 hover:text-slate-800">
-          <i data-lucide="x" class="w-4 h-4"></i>
-        </button>
-      </div>
-      <div id="modal-content" class="text-xs text-slate-600 space-y-3 leading-relaxed"></div>
-      <button onclick="closeInfoModal()" class="w-full py-2.5 rounded-2xl bg-slate-900 text-white font-semibold text-xs shadow-lg active:scale-98 transition">
-        Rozumím
-      </button>
+  <div id="control-panel">
+    <div class="output-group">
+      <input type="text" id="weightInput" placeholder="0" readonly>
+      <span style="font-size: 20px; font-weight: bold;">g</span>
     </div>
+    <div class="status" id="statusText">Inicializace...</div>
   </div>
+
+  <canvas id="cropCanvas"></canvas>
 
   <script>
-    const LOCATIONS = {
-      vent: { lat: 46.8576, lon: 10.9142, elev: 1895, name: "Vent" },
-      hut: { lat: 46.8282, lon: 10.8872, elev: 2501, name: "Martin-Busch-Hütte" },
-      summit: { lat: 46.8164, lon: 10.8701, elev: 3457, name: "Kreuzspitze" }
-    };
+    const video = document.getElementById('video');
+    const roi = document.getElementById('roi');
+    const canvas = document.getElementById('cropCanvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const weightInput = document.getElementById('weightInput');
+    const statusText = document.getElementById('statusText');
 
-    const DAY_NAMES = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
-    let selectedDayIndex = 0;
-    let globalCachedData = null;
+    let worker = null;
+    let isProcessing = false;
 
-    let multiTempChartInstance = null;
-    let multiWindChartInstance = null;
-    let multiCapeChartInstance = null;
-
-    // Radarové proměnné
-    let mapInstance = null;
-    let radarLayers = [];
-    let radarTimestamps = [];
-    let currentRadarIndex = 0;
-    let radarInterval = null;
-    let radarType = 'radar'; // 'radar' nebo 'satellite'
-    let isRadarPlaying = false;
-
-    const MODAL_INFO = {
-      tactical: {
-        title: "Taktické vyhodnocení & Alarm",
-        content: `
-          <p><strong>DEFCON 1 Alarm:</strong> Pokud CAPE překročí 750 J/kg nebo nárazy 60 km/h, rozbliká se červený varovný maják. To znamená nutnost okamžitého sestupu pod Martin-Busch-Hütte.</p>
-        `
-      },
-      models: {
-        title: "Multi-Model srovnání (5 dní)",
-        content: `
-          <p><strong>ICON-D2 & AROME:</strong> Nejvyšší přesnost na 1.–3. den (orografie a lokální konvekce).</p>
-          <p><strong>ECMWF IFS:</strong> Zlatý standard pro střednědobý trend (4. a 5. den).</p>
-        `
-      },
-      wind: {
-        title: "Nárazy větru na hřebeni",
-        content: `<p>Nárazy nad 50 km/h ztěžují stabilitu na suti, nárazy nad 60 km/h jsou na hřebeni nebezpečné pro pád.</p>`
-      },
-      cape: {
-        title: "CAPE a blesková aktivita",
-        content: `<p>Konvektivní dostupná potenciální energie (CAPE). Hodnoty nad 500 J/kg znamenají prudký vertikální růst mraků a blesky kolem poledne.</p>`
-      }
-    };
-
-    function openInfoModal(type) {
-      const modal = document.getElementById('info-modal');
-      const container = document.getElementById('modal-container');
-      const title = document.getElementById('modal-title');
-      const content = document.getElementById('modal-content');
-
-      const info = MODAL_INFO[type] || MODAL_INFO.tactical;
-      title.textContent = info.title;
-      content.innerHTML = info.content;
-
-      modal.classList.remove('hidden');
-      setTimeout(() => {
-        modal.classList.remove('opacity-0');
-        container.classList.remove('translate-y-full');
-      }, 10);
-    }
-
-    function closeInfoModal() {
-      const modal = document.getElementById('info-modal');
-      const container = document.getElementById('modal-container');
-      modal.classList.add('opacity-0');
-      container.classList.add('translate-y-full');
-      setTimeout(() => modal.classList.add('hidden'), 300);
-    }
-
-    function playAlarmBeep() {
+    // 1. Spuštění zadní kamery
+    async function initCamera() {
       try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.3);
-        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.3);
-      } catch (e) {
-        console.warn("Audio Context disabled", e);
-      }
-    }
-
-    window.addEventListener('DOMContentLoaded', () => {
-      lucide.createIcons();
-      initDayPicker();
-      initRadarMap();
-      loadCachedData();
-      fetchAlpineData();
-      fetchRainViewerRadar();
-    });
-
-    function initDayPicker() {
-      const container = document.getElementById('day-picker');
-      container.innerHTML = '';
-      const now = new Date();
-
-      for (let i = 0; i < 5; i++) {
-        const d = new Date();
-        d.setDate(now.getDate() + i);
-        const dayName = DAY_NAMES[d.getDay()];
-        const dateStr = `${d.getDate()}.${d.getMonth() + 1}.`;
-
-        const btn = document.createElement('button');
-        btn.id = `day-btn-${i}`;
-        btn.onclick = () => switchDay(i);
-        btn.className = i === 0 
-          ? "flex-1 min-w-[62px] py-1.5 px-1 rounded-2xl text-[10px] font-bold transition-all bg-slate-900 text-white shadow-sm flex flex-col items-center justify-center leading-tight"
-          : "flex-1 min-w-[62px] py-1.5 px-1 rounded-2xl text-[10px] font-bold text-slate-600 hover:text-slate-900 transition-all flex flex-col items-center justify-center leading-tight";
-        
-        btn.innerHTML = `
-          <span>${dayName}</span>
-          <span class="text-[9px] opacity-80 font-normal">${dateStr}</span>
-        `;
-        container.appendChild(btn);
-      }
-    }
-
-    function initRadarMap() {
-      mapInstance = L.map('radar-map', {
-        zoomControl: false,
-        attributionControl: false
-      }).setView([46.837, 10.892], 11);
-
-      // Topografická podkladová mapa
-      L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-        maxZoom: 14,
-        opacity: 0.85
-      }).addTo(mapInstance);
-
-      // Vykreslení trasy: Vent -> Chata -> Vrchol
-      const routeCoords = [
-        [LOCATIONS.vent.lat, LOCATIONS.vent.lon],
-        [LOCATIONS.hut.lat, LOCATIONS.hut.lon],
-        [LOCATIONS.summit.lat, LOCATIONS.summit.lon]
-      ];
-
-      L.polyline(routeCoords, {
-        color: '#0284c7',
-        weight: 3.5,
-        dashArray: '3, 6',
-        opacity: 0.95
-      }).addTo(mapInstance);
-
-      // Markery bodů
-      L.circleMarker([LOCATIONS.vent.lat, LOCATIONS.vent.lon], { radius: 5, color: '#10b981', fillOpacity: 1 }).addTo(mapInstance);
-      L.circleMarker([LOCATIONS.hut.lat, LOCATIONS.hut.lon], { radius: 5, color: '#f59e0b', fillOpacity: 1 }).addTo(mapInstance);
-      L.circleMarker([LOCATIONS.summit.lat, LOCATIONS.summit.lon], { radius: 6, color: '#dc2626', fillOpacity: 1 }).addTo(mapInstance);
-    }
-
-    async function fetchRainViewerRadar() {
-      try {
-        const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
-        const data = await res.json();
-        
-        // Získání snímků radaru nebo satelitu
-        const frames = radarType === 'radar' ? data.radar.past : data.satellite.infrared;
-        radarTimestamps = frames.map(f => f.time);
-
-        // Odstranění starých vrstev
-        radarLayers.forEach(layer => mapInstance.removeLayer(layer));
-        radarLayers = [];
-
-        // Vytvoření tile vrstev pro každý časový snímek
-        frames.forEach((frame, idx) => {
-          const layer = L.tileLayer(`${data.host}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`, {
-            opacity: idx === frames.length - 1 ? 0.75 : 0,
-            zIndex: 100 + idx
-          });
-          layer.addTo(mapInstance);
-          radarLayers.push(layer);
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
         });
-
-        currentRadarIndex = frames.length - 1;
-        updateRadarDisplay();
+        video.srcObject = stream;
+        await video.play();
+        statusText.innerText = "Načítám OCR model...";
+        initOCR();
       } catch (err) {
-        console.warn("Chyba při načítání RainViewer radaru:", err);
-        document.getElementById('radar-timestamp').textContent = 'Radar offline';
+        statusText.innerText = "Chyba kamery: " + err.message;
       }
     }
 
-    function updateRadarDisplay() {
-      if (radarLayers.length === 0) return;
-
-      radarLayers.forEach((layer, idx) => {
-        layer.setOpacity(idx === currentRadarIndex ? 0.75 : 0);
-      });
-
-      const time = new Date(radarTimestamps[currentRadarIndex] * 1000);
-      const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      document.getElementById('radar-timestamp').textContent = `Snímek: ${timeStr}`;
-    }
-
-    function toggleRadarPlay() {
-      isRadarPlaying = !isRadarPlaying;
-      const btnIcon = document.getElementById('radar-play-icon');
-      const btnText = document.getElementById('radar-play-text');
-
-      if (isRadarPlaying) {
-        btnText.textContent = "Pauza";
-        btnIcon.setAttribute('data-lucide', 'pause');
-        lucide.createIcons();
-
-        radarInterval = setInterval(() => {
-          currentRadarIndex = (currentRadarIndex + 1) % radarLayers.length;
-          updateRadarDisplay();
-        }, 650);
-      } else {
-        btnText.textContent = "Animace";
-        btnIcon.setAttribute('data-lucide', 'play');
-        lucide.createIcons();
-        clearInterval(radarInterval);
-      }
-    }
-
-    function toggleRadarType(type) {
-      if (radarType === type) return;
-      radarType = type;
-      
-      const radarBtn = document.getElementById('btn-type-radar');
-      const satBtn = document.getElementById('btn-type-sat');
-
-      if (type === 'radar') {
-        radarBtn.className = "px-2 py-0.5 rounded-full text-[9px] font-bold bg-sky-600 text-white";
-        satBtn.className = "px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-200 text-slate-700";
-      } else {
-        satBtn.className = "px-2 py-0.5 rounded-full text-[9px] font-bold bg-sky-600 text-white";
-        radarBtn.className = "px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-200 text-slate-700";
-      }
-
-      if (radarInterval) clearInterval(radarInterval);
-      isRadarPlaying = false;
-      document.getElementById('radar-play-text').textContent = "Animace";
-      document.getElementById('radar-play-icon').setAttribute('data-lucide', 'play');
-      lucide.createIcons();
-
-      fetchRainViewerRadar();
-    }
-
-    function switchDay(dayIndex) {
-      selectedDayIndex = dayIndex;
-      for (let i = 0; i < 5; i++) {
-        const btn = document.getElementById(`day-btn-${i}`);
-        if (!btn) continue;
-        if (i === dayIndex) {
-          btn.className = "flex-1 min-w-[62px] py-1.5 px-1 rounded-2xl text-[10px] font-bold transition-all bg-slate-900 text-white shadow-sm flex flex-col items-center justify-center leading-tight";
-        } else {
-          btn.className = "flex-1 min-w-[62px] py-1.5 px-1 rounded-2xl text-[10px] font-bold text-slate-600 hover:text-slate-900 transition-all flex flex-col items-center justify-center leading-tight";
-        }
-      }
-      if (globalCachedData) {
-        renderDashboard(globalCachedData);
-      }
-    }
-
-    async function fetchAlpineData() {
-      const btn = document.getElementById('refresh-btn');
-      const badge = document.getElementById('sync-badge');
-      
-      btn.classList.add('opacity-50', 'pointer-events-none');
-      badge.textContent = 'Aktualizuji';
-      badge.className = 'text-[10px] font-semibold text-sky-600 liquid-pill px-2.5 py-1 rounded-full';
-
+    // 2. Inicializace Tesseract Workeru (nastavený jen na číslice)
+    async function initOCR() {
       try {
-        const hourlyParams = [
-          "temperature_2m",
-          "apparent_temperature",
-          "precipitation_probability",
-          "wind_speed_10m",
-          "wind_gusts_10m",
-          "cape",
-          "freezing_level_height",
-          "uv_index"
-        ].join(",");
-
-        const [summitIconRes, summitAromeRes, summitEcmwfRes, ventRes] = await Promise.all([
-          fetch(`https://api.open-meteo.com/v1/dwd-icon?latitude=${LOCATIONS.summit.lat}&longitude=${LOCATIONS.summit.lon}&elevation=${LOCATIONS.summit.elev}&hourly=${hourlyParams}&timezone=Europe/Vienna&forecast_days=5&models=icon_d2`),
-          fetch(`https://api.open-meteo.com/v1/meteofrance?latitude=${LOCATIONS.summit.lat}&longitude=${LOCATIONS.summit.lon}&elevation=${LOCATIONS.summit.elev}&hourly=temperature_2m,wind_gusts_10m,cape,precipitation_probability&timezone=Europe/Vienna&forecast_days=5&models=arome_france_hd`),
-          fetch(`https://api.open-meteo.com/v1/ecmwf?latitude=${LOCATIONS.summit.lat}&longitude=${LOCATIONS.summit.lon}&elevation=${LOCATIONS.summit.elev}&hourly=temperature_2m,wind_gusts_10m,precipitation_probability&timezone=Europe/Vienna&forecast_days=5`),
-          fetch(`https://api.open-meteo.com/v1/dwd-icon?latitude=${LOCATIONS.vent.lat}&longitude=${LOCATIONS.vent.lon}&elevation=${LOCATIONS.vent.elev}&hourly=${hourlyParams}&timezone=Europe/Vienna&forecast_days=5&models=icon_d2`)
-        ]);
-
-        const summitIcon = await summitIconRes.json();
-        const summitArome = summitAromeRes.ok ? await summitAromeRes.json() : summitIcon;
-        const summitEcmwf = summitEcmwfRes.ok ? await summitEcmwfRes.json() : summitIcon;
-        const ventData = await ventRes.json();
-
-        globalCachedData = {
-          timestamp: new Date().toISOString(),
-          vent: ventData,
-          summitIcon: summitIcon,
-          summitArome: summitArome,
-          summitEcmwf: summitEcmwf
-        };
-
-        localStorage.setItem('alpine_multimodel_map_cache_5d', JSON.stringify(globalCachedData));
-        renderDashboard(globalCachedData);
-
-        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        badge.textContent = `${timeStr}`;
-        badge.className = 'text-[10px] font-semibold text-emerald-600 liquid-pill px-2.5 py-1 rounded-full';
-
-      } catch (e) {
-        console.warn("Offline fallback", e);
-        badge.textContent = 'Offline cache';
-        badge.className = 'text-[10px] font-semibold text-amber-600 liquid-pill px-2.5 py-1 rounded-full';
-        loadCachedData();
-      } finally {
-        btn.classList.remove('opacity-50', 'pointer-events-none');
+        worker = await Tesseract.createWorker('eng');
+        await worker.setParameters({
+          tessedit_char_whitelist: '0123456789.-', // Ignoruje písmena, hledá jen čísla a tečky
+          tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE // Očekáváme jeden řádek textu
+        });
+        statusText.innerText = "Skenuji...";
+        startScanningLoop();
+      } catch (err) {
+        statusText.innerText = "Chyba OCR: " + err.message;
       }
     }
 
-    function loadCachedData() {
-      const cached = localStorage.getItem('alpine_multimodel_map_cache_5d');
-      if (cached) {
+    // 3. Oříznutí a prahování výřezu na černobílou
+    function captureAndPreprocess() {
+      const vWidth = video.videoWidth;
+      const vHeight = video.videoHeight;
+      const cRect = video.getBoundingClientRect();
+      const rRect = roi.getBoundingClientRect();
+
+      // Přepočet souřadnic rámečku na reálné rozlišení videa
+      const scaleX = vWidth / cRect.width;
+      const scaleY = vHeight / cRect.height;
+
+      const sx = (rRect.left - cRect.left) * scaleX;
+      const sy = (rRect.top - cRect.top) * scaleY;
+      const sWidth = rRect.width * scaleX;
+      const sHeight = rRect.height * scaleY;
+
+      canvas.width = rRect.width;
+      canvas.height = rRect.height;
+
+      // Vykreslení oříznutého výřezu
+      ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+
+      // Binarizace: Převod na tvrdou černobílou (odstraní stíny a odlesky váhy)
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imgData.data;
+      const threshold = 110; // Práh pro LCD: tmavé segmenty vs světlé pozadí
+
+      for (let i = 0; i < data.length; i += 4) {
+        const avg = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+        // Pokud je displej tmavý se svítícími čísly, obrať nerovnost (> threshold)
+        const val = avg < threshold ? 0 : 255;
+        data[i] = val;
+        data[i + 1] = val;
+        data[i + 2] = val;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    // 4. Neustálá smyčka snímání
+    function startScanningLoop() {
+      setInterval(async () => {
+        if (isProcessing || !worker || video.readyState !== 4) return;
+
+        isProcessing = true;
+        captureAndPreprocess();
+
         try {
-          globalCachedData = JSON.parse(cached);
-          renderDashboard(globalCachedData);
-          const timeStr = new Date(globalCachedData.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          document.getElementById('sync-badge').textContent = `${timeStr}`;
+          const { data: { text } } = await worker.recognize(canvas);
+          const cleanVal = text.replace(/[^0-9.-]/g, '').trim();
+
+          if (cleanVal.length > 0 && !isNaN(cleanVal)) {
+            weightInput.value = cleanVal;
+            statusText.innerText = "Úspěšně přečteno";
+          }
         } catch (e) {
           console.error(e);
+        } finally {
+          isProcessing = false;
         }
-      }
+      }, 400); // Kontrola každých 400 ms
     }
 
-    function renderDashboard(data) {
-      const dayOffset = selectedDayIndex * 24;
-      const icon = data.summitIcon.hourly;
-      const arome = data.summitArome.hourly || icon;
-      const ecmwf = data.summitEcmwf.hourly || icon;
-
-      const baseIdx = dayOffset + 12;
-
-      const getVal = (arr, idx, fallbackArr) => {
-        if (arr && arr[idx] !== undefined && arr[idx] !== null) return arr[idx];
-        if (fallbackArr && fallbackArr[idx] !== undefined && fallbackArr[idx] !== null) return fallbackArr[idx];
-        return 0;
-      };
-
-      const iconT = Math.round(getVal(icon.temperature_2m, baseIdx, ecmwf.temperature_2m));
-      const aromeT = Math.round(getVal(arome.temperature_2m, baseIdx, ecmwf.temperature_2m));
-      const ecmT = Math.round(getVal(ecmwf.temperature_2m, baseIdx, icon.temperature_2m));
-
-      const iconW = Math.round(getVal(icon.wind_gusts_10m, baseIdx, ecmwf.wind_gusts_10m));
-      const aromeW = Math.round(getVal(arome.wind_gusts_10m, baseIdx, ecmwf.wind_gusts_10m));
-      const ecmW = Math.round(getVal(ecmwf.wind_gusts_10m, baseIdx, icon.wind_gusts_10m));
-
-      const iconC = Math.round(getVal(icon.cape, baseIdx, null));
-      const aromeC = Math.round(getVal(arome.cape, baseIdx, icon.cape));
-
-      document.getElementById('model-icon-temp').textContent = `${iconT} °C`;
-      document.getElementById('model-icon-wind').textContent = `${iconW} km/h`;
-      document.getElementById('model-icon-cape').textContent = iconC ? `CAPE ${iconC}` : `CAPE --`;
-
-      document.getElementById('model-arome-temp').textContent = `${aromeT} °C`;
-      document.getElementById('model-arome-wind').textContent = `${aromeW} km/h`;
-      document.getElementById('model-arome-cape').textContent = aromeC ? `CAPE ${aromeC}` : `CAPE --`;
-
-      document.getElementById('model-ecm-temp').textContent = `${ecmT} °C`;
-      document.getElementById('model-ecm-wind').textContent = `${ecmW} km/h`;
-      document.getElementById('model-ecm-cape').textContent = `CAPE --`;
-
-      const tempSpread = Math.max(iconT, aromeT, ecmT) - Math.min(iconT, aromeT, ecmT);
-      const agreeText = document.getElementById('model-agreement-text');
-      if (tempSpread <= 2) {
-        agreeText.textContent = `✓ Den ${selectedDayIndex + 1}: Vysoká shoda modelů (Rozptyl ${tempSpread} °C)`;
-        agreeText.className = "text-[10px] text-center font-semibold text-emerald-600 pt-0.5";
-      } else {
-        agreeText.textContent = `⚠ Den ${selectedDayIndex + 1}: Rozptyl modelů ${tempSpread} °C • Zvýšená nejistota`;
-        agreeText.className = "text-[10px] text-center font-semibold text-amber-600 pt-0.5";
-      }
-
-      evaluateCriticalRisk(icon, arome, ecmwf, dayOffset);
-      renderMultiModelCharts(icon, arome, ecmwf, dayOffset);
-    }
-
-    function evaluateCriticalRisk(icon, arome, ecmwf, dayOffset) {
-      const riskCard = document.getElementById('risk-card');
-      const dot = document.getElementById('risk-dot');
-      const label = document.getElementById('risk-label');
-      const desc = document.getElementById('risk-summary');
-      const strobeAlert = document.getElementById('critical-strobe-alert');
-
-      const windowStart = dayOffset + 5;
-      const windowEnd = dayOffset + 17;
-
-      const getSlice = (arr, start, end, fallback) => {
-        if (arr && arr.length >= end) return arr.slice(start, end);
-        if (fallback && fallback.length >= end) return fallback.slice(start, end);
-        return [0];
-      };
-
-      const capeSliceIcon = getSlice(icon.cape, windowStart, windowEnd, null);
-      const capeSliceArome = getSlice(arome.cape, windowStart, windowEnd, capeSliceIcon);
-      const gustsSlice = getSlice(icon.wind_gusts_10m, windowStart, windowEnd, ecmwf.wind_gusts_10m);
-
-      const maxCape = Math.max(...capeSliceIcon, ...capeSliceArome, 0);
-      const maxGusts = Math.max(...gustsSlice, 0);
-
-      // DEFCON 1 - Krizový stav
-      if (maxCape > 750 || maxGusts > 60) {
-        strobeAlert.classList.remove('hidden');
-        riskCard.className = "liquid-glass rounded-3xl p-4 transition-all duration-300 critical-alarm";
-        dot.className = "w-3 h-3 rounded-full bg-red-600 strobe-fast";
-        label.className = "text-[11px] font-bold uppercase tracking-wider text-red-700 flex items-center gap-1";
-        label.innerHTML = `<span class="strobe-fast">🚨 DEFCON 1: AKUTNÍ POPLACH</span>`;
-        desc.className = "text-xs text-red-900 font-bold leading-relaxed";
-        desc.textContent = `Extrémní nebezpečí! CAPE dosahuje ${maxCape} J/kg a nárazy ${maxGusts} km/h. Vrcholový hřeben je smrtelnou pastí. Okamžitý návrat do 11:00!`;
-        
-        document.getElementById('blob-1').className = "absolute -top-24 -left-20 w-80 h-80 bg-red-400/60 rounded-full blur-3xl";
-        document.getElementById('blob-2').className = "absolute top-1/3 -right-24 w-88 h-88 bg-rose-400/50 rounded-full blur-3xl";
-      } else if (maxCape > 300 || maxGusts > 40) {
-        strobeAlert.classList.add('hidden');
-        riskCard.className = "liquid-glass rounded-3xl p-4 transition-all duration-300 border border-amber-300 bg-amber-50/60";
-        dot.className = "w-3 h-3 rounded-full bg-amber-500 animate-pulse";
-        label.className = "text-[11px] font-bold uppercase tracking-wider text-amber-700";
-        label.textContent = "Zvýšené riziko • Sledovat oblohu";
-        desc.className = "text-xs text-slate-700 font-medium leading-relaxed";
-        desc.textContent = `Mírná odpolední konvekce (CAPE ${maxCape} J/kg, vítr ${maxGusts} km/h). Výstup možný jen při startu v 05:00.`;
-      } else {
-        strobeAlert.classList.add('hidden');
-        riskCard.className = "liquid-glass rounded-3xl p-4 transition-all duration-300 border border-emerald-200 bg-emerald-50/40";
-        dot.className = "w-3 h-3 rounded-full bg-emerald-500";
-        label.className = "text-[11px] font-bold uppercase tracking-wider text-emerald-700";
-        label.textContent = "Stabilní okno • Bezpečný výstup";
-        desc.className = "text-xs text-slate-700 font-medium leading-relaxed";
-        desc.textContent = `Příznivé podmínky. Klidný vítr do ${maxGusts} km/h a minimální konvektivní energie.`;
-      }
-    }
-
-    function renderMultiModelCharts(icon, arome, ecmwf, dayOffset) {
-      const sliceStart = dayOffset + 4;
-      const sliceEnd = dayOffset + 21;
-
-      const timeSource = (ecmwf.time && ecmwf.time.length >= sliceEnd) ? ecmwf.time : icon.time;
-      const labels = timeSource.slice(sliceStart, sliceEnd).map(t => t.slice(11, 16));
-
-      const safeSlice = (arr, start, end, fallback) => {
-        if (arr && arr.length >= end) return arr.slice(start, end);
-        if (fallback && fallback.length >= end) return fallback.slice(start, end);
-        return new Array(end - start).fill(0);
-      };
-
-      // 1. Teploty
-      const iconT = safeSlice(icon.temperature_2m, sliceStart, sliceEnd, ecmwf.temperature_2m);
-      const aromeT = safeSlice(arome.temperature_2m, sliceStart, sliceEnd, ecmwf.temperature_2m);
-      const ecmT = safeSlice(ecmwf.temperature_2m, sliceStart, sliceEnd, icon.temperature_2m);
-
-      const ctx1 = document.getElementById('multiTempChart').getContext('2d');
-      if (multiTempChartInstance) multiTempChartInstance.destroy();
-      multiTempChartInstance = new Chart(ctx1, {
-        type: 'line',
-        data: {
-          labels: labels,
-          datasets: [
-            { label: 'ICON-D2', data: iconT, borderColor: '#0284c7', borderWidth: 2.2, tension: 0.35, pointRadius: 0 },
-            { label: 'AROME', data: aromeT, borderColor: '#8b5cf6', borderWidth: 1.8, borderDash: [3, 3], tension: 0.35, pointRadius: 0 },
-            { label: 'ECMWF', data: ecmT, borderColor: '#10b981', borderWidth: 1.8, tension: 0.35, pointRadius: 0 }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { grid: { display: false }, ticks: { font: { size: 9 }, color: '#94a3b8', maxTicksLimit: 6 } },
-            y: { grid: { color: 'rgba(0,0,0,0.03)' }, ticks: { font: { size: 9 }, color: '#64748b' } }
-          }
-        }
-      });
-
-      // 2. Nárazy větru
-      const iconG = safeSlice(icon.wind_gusts_10m, sliceStart, sliceEnd, ecmwf.wind_gusts_10m);
-      const aromeG = safeSlice(arome.wind_gusts_10m, sliceStart, sliceEnd, ecmwf.wind_gusts_10m);
-      const ecmG = safeSlice(ecmwf.wind_gusts_10m, sliceStart, sliceEnd, icon.wind_gusts_10m);
-
-      const ctx2 = document.getElementById('multiWindChart').getContext('2d');
-      if (multiWindChartInstance) multiWindChartInstance.destroy();
-      multiWindChartInstance = new Chart(ctx2, {
-        type: 'line',
-        data: {
-          labels: labels,
-          datasets: [
-            { label: 'ICON-D2', data: iconG, borderColor: '#0284c7', backgroundColor: 'rgba(2, 132, 199, 0.05)', fill: true, borderWidth: 2, tension: 0.35, pointRadius: 0 },
-            { label: 'AROME', data: aromeG, borderColor: '#8b5cf6', borderWidth: 1.8, borderDash: [3, 3], tension: 0.35, pointRadius: 0 },
-            { label: 'ECMWF', data: ecmG, borderColor: '#10b981', borderWidth: 1.8, tension: 0.35, pointRadius: 0 }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { grid: { display: false }, ticks: { font: { size: 9 }, color: '#94a3b8', maxTicksLimit: 6 } },
-            y: { grid: { color: 'rgba(0,0,0,0.03)' }, ticks: { font: { size: 9 }, color: '#64748b' } }
-          }
-        }
-      });
-
-      // 3. CAPE & Srážky
-      const iconCape = safeSlice(icon.cape, sliceStart, sliceEnd, null);
-      const aromeCape = safeSlice(arome.cape, sliceStart, sliceEnd, iconCape);
-      const precip = safeSlice(icon.precipitation_probability, sliceStart, sliceEnd, ecmwf.precipitation_probability);
-
-      const ctx3 = document.getElementById('multiCapeChart').getContext('2d');
-      if (multiCapeChartInstance) multiCapeChartInstance.destroy();
-      multiCapeChartInstance = new Chart(ctx3, {
-        data: {
-          labels: labels,
-          datasets: [
-            {
-              type: 'bar',
-              label: 'Srážky (%)',
-              data: precip,
-              backgroundColor: 'rgba(59, 130, 246, 0.25)',
-              borderRadius: 6,
-              yAxisID: 'yPrecip'
-            },
-            {
-              type: 'line',
-              label: 'ICON CAPE',
-              data: iconCape,
-              borderColor: '#d97706',
-              borderWidth: 2,
-              tension: 0.35,
-              yAxisID: 'yCape',
-              pointRadius: 0
-            },
-            {
-              type: 'line',
-              label: 'AROME CAPE',
-              data: aromeCape,
-              borderColor: '#8b5cf6',
-              borderDash: [3, 3],
-              borderWidth: 1.8,
-              tension: 0.35,
-              yAxisID: 'yCape',
-              pointRadius: 0
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { grid: { display: false }, ticks: { font: { size: 9 }, color: '#94a3b8', maxTicksLimit: 6 } },
-            y: { grid: { color: 'rgba(0,0,0,0.03)' }, ticks: { font: { size: 9 }, color: '#d97706' } },
-            yPrecip: {
-              type: 'linear',
-              position: 'right',
-              max: 100,
-              min: 0,
-              grid: { display: false },
-              ticks: { font: { size: 9 }, color: '#3b82f6' }
-            }
-          }
-        }
-      });
-    }
+    window.addEventListener('load', initCamera);
   </script>
 </body>
 </html>
