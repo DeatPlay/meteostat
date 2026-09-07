@@ -3,11 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Inteligentní čtečka váhy</title>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <title>Smart Čtečka Váhy (AI Vision)</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
-    body { background: #121212; color: #fff; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+    body { background: #111; color: #fff; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
 
     #camera-container {
       position: relative;
@@ -25,29 +24,36 @@
       object-fit: cover;
     }
 
-    /* Cílová zóna uprostřed obrazovky */
+    /* Rámeček na celou váhu */
     .target-zone {
       position: absolute;
-      width: 250px;
-      height: 65px;
-      border: 2px dashed rgba(255, 255, 255, 0.3);
-      border-radius: 8px;
+      width: 280px;
+      height: 370px;
+      border: 2px dashed rgba(255, 255, 255, 0.35);
+      border-radius: 16px;
       pointer-events: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .target-zone.aligned {
+      border-color: #00ff88;
+      border-style: solid;
+      box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
     }
 
     .target-zone::after {
-      content: 'CÍLOVÉ MÍSTO PRO DISPLEJ';
+      content: 'ZAROVNEJ CELOU VÁHU SEM';
       position: absolute;
-      bottom: -20px;
+      top: -24px;
       left: 50%;
       transform: translateX(-50%);
-      font-size: 10px;
+      font-size: 11px;
       letter-spacing: 1px;
-      color: rgba(255, 255, 255, 0.4);
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.6);
       white-space: nowrap;
     }
 
-    /* Vektorová vrstva pro šipku a přilepený rámeček */
     #overlaySvg {
       position: absolute;
       top: 0;
@@ -55,37 +61,12 @@
       width: 100%;
       height: 100%;
       pointer-events: none;
-      z-index: 4;
-    }
-
-    #preview-container {
-      position: absolute;
-      bottom: 12px;
-      right: 12px;
-      border: 1px solid #444;
-      background: #000;
-      padding: 3px;
-      border-radius: 4px;
-      text-align: center;
       z-index: 5;
-    }
-
-    #preview-container span {
-      display: block;
-      font-size: 9px;
-      color: #888;
-      margin-bottom: 2px;
-    }
-
-    #cropCanvas {
-      width: 120px;
-      height: auto;
-      display: block;
     }
 
     #control-panel {
       padding: 16px;
-      background: #1e1e1e;
+      background: #1a1a1a;
       display: flex;
       flex-direction: column;
       gap: 12px;
@@ -104,9 +85,9 @@
       font-size: 32px;
       font-weight: bold;
       text-align: center;
-      background: #2a2a2a;
+      background: #262626;
       border: 1px solid #444;
-      border-radius: 6px;
+      border-radius: 8px;
       color: #00ff88;
     }
 
@@ -128,9 +109,8 @@
 
     button#snapBtn:disabled {
       background: #444;
-      color: #777;
+      color: #888;
       cursor: not-allowed;
-      transform: none;
     }
 
     .status {
@@ -138,6 +118,8 @@
       color: #aaa;
       text-align: center;
     }
+
+    #captureCanvas, #trackerCanvas { display: none; }
   </style>
 </head>
 <body>
@@ -145,54 +127,48 @@
   <div id="camera-container">
     <video id="video" playsinline autoplay muted></video>
     
-    <!-- Cílové pole uprostřed -->
     <div class="target-zone" id="targetZone"></div>
 
-    <!-- SVG plátno pro kreslení šipky a detekovaného rámečku -->
     <svg id="overlaySvg">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M 0 1 L 10 5 L 0 9 z" fill="#00ff88" />
         </marker>
       </defs>
-      <!-- Rámeček přilepený na displej -->
-      <rect id="trackedRect" x="0" y="0" width="0" height="0" fill="rgba(0, 255, 136, 0.15)" stroke="#00ff88" stroke-width="2" rx="6" style="display: none;" />
-      <!-- Naváděcí linie se šipkou -->
-      <line id="guideLine" x1="0" y1="0" x2="0" y2="0" stroke="#00ff88" stroke-width="2.5" stroke-dasharray="6,4" marker-end="url(#arrow)" style="display: none;" />
-      <!-- Text pokynu -->
-      <text id="guideText" x="0" y="0" fill="#00ff88" font-size="13" font-weight="bold" text-anchor="middle" style="display: none;"></text>
+      <!-- Přilepený rámeček k displeji -->
+      <rect id="trackedScale" x="0" y="0" width="0" height="0" fill="rgba(0, 255, 136, 0.12)" stroke="#00ff88" stroke-width="2" rx="8" style="display: none;" />
+      <!-- Vodicí linie -->
+      <line id="guideLine" x1="0" y1="0" x2="0" y2="0" stroke="#00ff88" stroke-width="3" stroke-dasharray="6,4" marker-end="url(#arrow)" style="display: none;" />
+      <!-- Instrukce k pohybu -->
+      <text id="guideText" x="0" y="0" fill="#00ff88" font-size="14" font-weight="bold" text-anchor="middle" style="display: none;"></text>
     </svg>
-
-    <div id="preview-container">
-      <span>UPRAVENÝ VÝŘEZ</span>
-      <canvas id="cropCanvas"></canvas>
-    </div>
   </div>
 
   <div id="control-panel">
     <div class="output-group">
-      <input type="text" id="weightInput" placeholder="0.00" readonly>
+      <input type="text" id="weightInput" placeholder="--.--" readonly>
       <span style="font-size: 24px; font-weight: bold;">g</span>
     </div>
 
-    <button id="snapBtn" disabled>Načítám OCR...</button>
-    <div class="status" id="statusText">Spouštím kameru...</div>
+    <button id="snapBtn">VYFOTIT A PŘEČÍST PŘES AI</button>
+    <div class="status" id="statusText">Inicializace...</div>
   </div>
 
-  <!-- Pomocný canvas pro tracker zelené plochy -->
-  <canvas id="trackerCanvas" width="80" height="60" style="display: none;"></canvas>
+  <canvas id="trackerCanvas" width="80" height="60"></canvas>
+  <canvas id="captureCanvas"></canvas>
 
   <script>
+    const GEMINI_API_KEY = "TVUJ_GEMINI_API_KEY";
+
     const video = document.getElementById('video');
     const targetZone = document.getElementById('targetZone');
-    const canvas = document.getElementById('cropCanvas');
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    
     const trackerCanvas = document.getElementById('trackerCanvas');
     const tCtx = trackerCanvas.getContext('2d', { willReadFrequently: true });
+    
+    const captureCanvas = document.getElementById('captureCanvas');
+    const cCtx = captureCanvas.getContext('2d');
 
-    const overlaySvg = document.getElementById('overlaySvg');
-    const trackedRect = document.getElementById('trackedRect');
+    const trackedScale = document.getElementById('trackedScale');
     const guideLine = document.getElementById('guideLine');
     const guideText = document.getElementById('guideText');
 
@@ -200,11 +176,9 @@
     const statusText = document.getElementById('statusText');
     const snapBtn = document.getElementById('snapBtn');
 
-    let worker = null;
     let isProcessing = false;
-    let latestDisplayBox = null; // Souřadnice reálného displeje ve videu
 
-    async function init() {
+    async function initCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
@@ -213,25 +187,15 @@
         video.srcObject = stream;
         await video.play();
 
-        statusText.innerText = "Připravuji OCR model...";
-        worker = await Tesseract.createWorker('eng');
-        await worker.setParameters({
-          tessedit_char_whitelist: '0123456789',
-          tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE
-        });
-
-        statusText.innerText = "Namiřte kameru na zelený displej váhy.";
-        snapBtn.innerText = "VYFOTIT A PŘEČÍST";
-        snapBtn.disabled = false;
-
-        startTrackingLoop();
+        statusText.innerText = "Namiřte na váhu.";
+        startLiveTracking();
       } catch (err) {
-        statusText.innerText = "Chyba: " + err.message;
+        statusText.innerText = "Chyba kamery: " + err.message;
       }
     }
 
-    // Živý tracker: hledá zelenou skvrnu displeje a počítá naváděcí vektor
-    function startTrackingLoop() {
+    // Detekce displeje (zelený i oranžový) + ověření černého rámečku
+    function startLiveTracking() {
       setInterval(() => {
         if (video.readyState !== 4 || isProcessing) return;
 
@@ -243,7 +207,6 @@
         let minX = tw, maxX = 0, minY = th, maxY = 0;
         let hits = 0;
 
-        // Hledání pixelů zeleného LCD
         for (let y = 0; y < th; y++) {
           for (let x = 0; x < tw; x++) {
             const idx = (y * tw + x) * 4;
@@ -251,205 +214,173 @@
             const g = data[idx + 1];
             const b = data[idx + 2];
 
-            if (g > 65 && g > r + 16 && g > b + 16) {
-              hits++;
-              if (x < minX) minX = x;
-              if (x > maxX) maxX = x;
-              if (y < minY) minY = y;
-              if (y > maxY) maxY = y;
-            }
-          }
-        }
+            // 1. Zelené LCD podsvícení
+            const isGreenLCD = (g > 65 && g > r + 15 && g > b + 15);
 
-        // Pokud je nalezena dostatečná plocha displeje
-        if (hits > 25 && (maxX - minX) > 4 && (maxY - minY) > 2) {
-          const cRect = video.getBoundingClientRect();
-          const scaleX = cRect.width / tw;
-          const scaleY = cRect.height / th;
+            // 2. Oranžové / jantarové LCD podsvícení
+            const isOrangeLCD = (r > 130 && g > 55 && g < r * 0.85 && b < 70 && (r - g) > 25);
 
-          const screenX = cRect.left + minX * scaleX;
-          const screenY = cRect.top + minY * scaleY;
-          const screenW = (maxX - minX) * scaleX;
-          const screenH = (maxY - minY) * scaleY;
-
-          // Uložení boxu pro samotné vyfocení (v reálných video pixelech)
-          const vidScaleX = video.videoWidth / tw;
-          const vidScaleY = video.videoHeight / th;
-          latestDisplayBox = {
-            sx: minX * vidScaleX,
-            sy: minY * vidScaleY,
-            sw: (maxX - minX) * vidScaleX,
-            sh: (maxY - minY) * vidScaleY
-          };
-
-          // Vykreslit rámeček přilepený k displeji
-          trackedRect.setAttribute('x', screenX);
-          trackedRect.setAttribute('y', screenY);
-          trackedRect.setAttribute('width', screenW);
-          trackedRect.setAttribute('height', screenH);
-          trackedRect.style.display = 'block';
-
-          // Cílové souřadnice středu
-          const tRect = targetZone.getBoundingClientRect();
-          const targetCenterX = tRect.left + tRect.width / 2;
-          const targetCenterY = tRect.top + tRect.height / 2;
-
-          // Aktuální střed displeje
-          const currentCenterX = screenX + screenW / 2;
-          const currentCenterY = screenY + screenH / 2;
-
-          const dx = targetCenterX - currentCenterX;
-          const dy = targetCenterY - currentCenterY;
-          const dist = Math.hypot(dx, dy);
-
-          if (dist > 35) {
-            // Šipka ukazující směr posunu
-            guideLine.setAttribute('x1', currentCenterX);
-            guideLine.setAttribute('y1', currentCenterY);
-            guideLine.setAttribute('x2', targetCenterX);
-            guideLine.setAttribute('y2', targetCenterY);
-            guideLine.style.display = 'block';
-
-            let moveText = 'Posuňte telefon ';
-            if (Math.abs(dy) > 25) moveText += dy > 0 ? 'níže ' : 'výše ';
-            if (Math.abs(dx) > 25) moveText += dx > 0 ? 'doprava' : 'doleva';
-
-            guideText.setAttribute('x', currentCenterX);
-            guideText.setAttribute('y', currentCenterY - 12);
-            guideText.textContent = moveText;
-            guideText.style.display = 'block';
-
-            snapBtn.style.background = '#444';
-            snapBtn.style.color = '#888';
-          } else {
-            // Displej je perfektně v cílovém rámečku
-            guideLine.style.display = 'none';
-            guideText.setAttribute('x', currentCenterX);
-            guideText.setAttribute('y', currentCenterY - 12);
-            guideText.textContent = '✓ PERFEKTNÍ POZICE';
-            guideText.style.display = 'block';
-
-            snapBtn.style.background = '#00ff88';
-            snapBtn.style.color = '#000';
-          }
-        } else {
-          // Displej není vidět
-          trackedRect.style.display = 'none';
-          guideLine.style.display = 'none';
-          guideText.style.display = 'none';
-          latestDisplayBox = null;
-          snapBtn.style.background = '#00ff88';
-          snapBtn.style.color = '#000';
-        }
-      }, 70);
-    }
-
-    // Vyfocení s asymetrickou dilatací (horizontálně silněji, vertikálně jemně)
-    async function captureAndRead() {
-      if (isProcessing || !worker || video.readyState !== 4) return;
-
-      isProcessing = true;
-      snapBtn.disabled = true;
-      snapBtn.innerText = "Čtu hodnotu...";
-      statusText.innerText = "Zpracovávám snímek...";
-
-      try {
-        let sx, sy, sWidth, sHeight;
-
-        // Pokud tracker displej našel, použijeme jeho přímý ořez, jinak středový rámeček
-        if (latestDisplayBox && latestDisplayBox.sw > 30) {
-          sx = latestDisplayBox.sx;
-          sy = latestDisplayBox.sy;
-          sWidth = latestDisplayBox.sw;
-          sHeight = latestDisplayBox.sh;
-        } else {
-          const vWidth = video.videoWidth;
-          const vHeight = video.videoHeight;
-          const cRect = video.getBoundingClientRect();
-          const tRect = targetZone.getBoundingClientRect();
-
-          const scaleX = vWidth / cRect.width;
-          const scaleY = vHeight / cRect.height;
-          sx = (tRect.left - cRect.left) * scaleX;
-          sy = (tRect.top - cRect.top) * scaleY;
-          sWidth = tRect.width * scaleX;
-          sHeight = tRect.height * scaleY;
-        }
-
-        const w = 280;
-        const h = 70;
-        canvas.width = w;
-        canvas.height = h;
-
-        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, w, h);
-
-        const imgData = ctx.getImageData(0, 0, w, h);
-        const data = imgData.data;
-
-        // 1. Prahování
-        const bin = new Uint8Array(w * h);
-        const threshold = 115;
-
-        for (let i = 0; i < data.length; i += 4) {
-          const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-          bin[i / 4] = (gray < threshold) ? 1 : 0;
-        }
-
-        // 2. Asymetrická dilatace: HORIZONTÁLNĚ VÍCE (rx = 2), VERTIKÁLNĚ MÉNĚ (ry = 1)
-        const dilated = new Uint8Array(w * h);
-        const rx = 2; // silnější vodorovně
-        const ry = 1; // jemně svisle
-
-        for (let y = ry; y < h - ry; y++) {
-          for (let x = rx; x < w - rx; x++) {
-            if (bin[y * w + x] === 1) {
-              for (let dy = -ry; dy <= ry; dy++) {
-                for (let dx = -rx; dx <= rx; dx++) {
-                  dilated[(y + dy) * w + (x + dx)] = 1;
+            if (isGreenLCD || isOrangeLCD) {
+              // 3. Kontrola černého krytu v okolí (černý plast pod a vedle displeje)
+              let hasDarkNeighbor = false;
+              for (let dy = -2; dy <= 2; dy++) {
+                for (let dx = -2; dx <= 2; dx++) {
+                  const ny = y + dy;
+                  const nx = x + dx;
+                  if (nx >= 0 && nx < tw && ny >= 0 && ny < th) {
+                    const nIdx = (ny * tw + nx) * 4;
+                    const brightness = (data[nIdx] * 0.299 + data[nIdx + 1] * 0.587 + data[nIdx + 2] * 0.114);
+                    if (brightness < 45) {
+                      hasDarkNeighbor = true;
+                      break;
+                    }
+                  }
                 }
+                if (hasDarkNeighbor) break;
+              }
+
+              if (hasDarkNeighbor) {
+                hits++;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
               }
             }
           }
         }
 
-        // 3. Vykreslení do canvasu
-        for (let i = 0; i < dilated.length; i++) {
-          const isDigit = dilated[i] === 1;
-          const color = isDigit ? 0 : 255;
-          const p = i * 4;
-          data[p] = color;
-          data[p + 1] = color;
-          data[p + 2] = color;
-          data[p + 3] = 255;
-        }
-        ctx.putImageData(imgData, 0, 0);
+        // Pokud je nalezena souvislá plocha displeje v černém rámu
+        if (hits > 18 && (maxX - minX) > 4) {
+          const cRect = video.getBoundingClientRect();
+          const scaleX = cRect.width / tw;
+          const scaleY = cRect.height / th;
 
-        // 4. OCR vyhodnocení
-        const { data: { text } } = await worker.recognize(canvas);
-        const digits = text.replace(/\D/g, '');
+          const dispX = cRect.left + minX * scaleX;
+          const dispY = cRect.top + minY * scaleY;
+          const dispW = (maxX - minX) * scaleX;
+          const dispH = (maxY - minY) * scaleY;
 
-        if (digits.length >= 3) {
-          const firstThree = digits.substring(0, 3);
-          const formatted = firstThree[0] + '.' + firstThree.substring(1);
-          weightInput.value = formatted;
-          statusText.innerText = `Načteno: ${formatted} g`;
-        } else if (digits.length > 0) {
-          statusText.innerText = `Neúplný odpočet (${digits}), zkuste znovu s lepším zarovnáním.`;
+          trackedScale.setAttribute('x', dispX);
+          trackedScale.setAttribute('y', dispY);
+          trackedScale.setAttribute('width', dispW);
+          trackedScale.setAttribute('height', dispH);
+          trackedScale.style.display = 'block';
+
+          // Cílové umístění displeje v dolní části celého rámečku váhy
+          const tRect = targetZone.getBoundingClientRect();
+          const targetX = tRect.left + tRect.width / 2;
+          const targetY = tRect.top + tRect.height * 0.72;
+
+          const currX = dispX + dispW / 2;
+          const currY = dispY + dispH / 2;
+
+          const dx = targetX - currX;
+          const dy = targetY - currY;
+          const dist = Math.hypot(dx, dy);
+
+          if (dist > 45) {
+            targetZone.classList.remove('aligned');
+            guideLine.setAttribute('x1', currX);
+            guideLine.setAttribute('y1', currY);
+            guideLine.setAttribute('x2', targetX);
+            guideLine.setAttribute('y2', targetY);
+            guideLine.style.display = 'block';
+
+            let msg = 'Posuň ';
+            if (Math.abs(dy) > 28) msg += dy > 0 ? 'níže ' : 'výše ';
+            if (Math.abs(dx) > 28) msg += dx > 0 ? 'doprava' : 'doleva';
+
+            guideText.setAttribute('x', currX);
+            guideText.setAttribute('y', currY - 14);
+            guideText.textContent = msg;
+            guideText.style.display = 'block';
+          } else {
+            targetZone.classList.add('aligned');
+            guideLine.style.display = 'none';
+            guideText.setAttribute('x', currX);
+            guideText.setAttribute('y', currY - 14);
+            guideText.textContent = '✓ VÁHA ZAROVNÁNA';
+            guideText.style.display = 'block';
+          }
         } else {
-          statusText.innerText = "Číslice nerozpoznány, srovnejte displej do cílového pole.";
+          trackedScale.style.display = 'none';
+          guideLine.style.display = 'none';
+          guideText.style.display = 'none';
+          targetZone.classList.remove('aligned');
+        }
+      }, 70);
+    }
+
+    // Vyfocení celé váhy a přečtení přes Vision API
+    async function captureAndSendToAI() {
+      if (isProcessing || video.readyState !== 4) return;
+
+      if (!GEMINI_API_KEY || GEMINI_API_KEY === "TVUJ_GEMINI_API_KEY") {
+        alert("Nejprve vložte svůj Gemini API klíč do proměnné GEMINI_API_KEY.");
+        return;
+      }
+
+      isProcessing = true;
+      snapBtn.disabled = true;
+      snapBtn.innerText = "Analyzuji přes AI...";
+      statusText.innerText = "Odesílám snímek do Vision AI...";
+
+      try {
+        const vWidth = video.videoWidth;
+        const vHeight = video.videoHeight;
+        const cRect = video.getBoundingClientRect();
+        const tRect = targetZone.getBoundingClientRect();
+
+        const scaleX = vWidth / cRect.width;
+        const scaleY = vHeight / cRect.height;
+
+        const sx = (tRect.left - cRect.left) * scaleX;
+        const sy = (tRect.top - cRect.top) * scaleY;
+        const sw = tRect.width * scaleX;
+        const sh = tRect.height * scaleY;
+
+        captureCanvas.width = 420;
+        captureCanvas.height = 540;
+        cCtx.drawImage(video, sx, sy, sw, sh, 0, 0, 420, 540);
+
+        const base64Data = captureCanvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: "Přečti přesné číslo na displeji této kapesní váhy (LCD displej může být zelený, modrý i oranžový). Vrať POUZE číselnou hodnotu včetně případné desetinné tečky (např. 93.91, 5.45 nebo 0.00). Nevracej žádný další text, jednotky ani uvozovky." },
+                { inline_data: { mime_type: "image/jpeg", data: base64Data } }
+              ]
+            }]
+          })
+        });
+
+        const result = await response.json();
+        const aiText = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+        if (aiText) {
+          const cleanNum = aiText.replace(/[^0-9.,-]/g, '').replace(',', '.');
+          weightInput.value = cleanNum;
+          statusText.innerText = `AI načetla: ${cleanNum} g`;
+        } else {
+          statusText.innerText = "Hodnotu se nepodařilo přečíst, zkuste zaostřit a vyfotit znovu.";
         }
       } catch (err) {
         console.error(err);
-        statusText.innerText = "Chyba při čtení: " + err.message;
+        statusText.innerText = "Chyba API: " + err.message;
       } finally {
         isProcessing = false;
         snapBtn.disabled = false;
-        snapBtn.innerText = "VYFOTIT A PŘEČÍST";
+        snapBtn.innerText = "VYFOTIT A PŘEČÍST PŘES AI";
       }
     }
 
-    snapBtn.addEventListener('click', captureAndRead);
-    window.addEventListener('load', init);
+    snapBtn.addEventListener('click', captureAndSendToAI);
+    window.addEventListener('load', initCamera);
   </script>
 </body>
 </html>
