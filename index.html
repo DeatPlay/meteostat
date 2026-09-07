@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Čtečka váhy (Auto-tečka)</title>
+  <title>Čtečka váhy (Foto na spoušť)</title>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
@@ -25,10 +25,10 @@
       object-fit: cover;
     }
 
-    /* Rámeček zaměřený pouze na zelený displej */
+    /* Rámeček pouze na zelené pole */
     .roi-box {
       position: absolute;
-      width: 220px;
+      width: 230px;
       height: 55px;
       border: 2px solid #00ff88;
       border-radius: 6px;
@@ -67,7 +67,7 @@
     }
 
     #cropCanvas {
-      width: 120px;
+      width: 130px;
       height: auto;
       display: block;
     }
@@ -99,6 +99,29 @@
       color: #00ff88;
     }
 
+    button#snapBtn {
+      padding: 16px;
+      font-size: 18px;
+      font-weight: bold;
+      color: #000;
+      background: #00ff88;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+
+    button#snapBtn:active {
+      transform: scale(0.98);
+    }
+
+    button#snapBtn:disabled {
+      background: #555;
+      color: #888;
+      cursor: not-allowed;
+      transform: none;
+    }
+
     .status {
       font-size: 13px;
       color: #aaa;
@@ -113,7 +136,7 @@
     <div class="roi-box" id="roi"></div>
 
     <div id="preview-container">
-      <span>UPRAVENÝ OBRAZ</span>
+      <span>ZACHYCENÝ VÝŘEZ</span>
       <canvas id="cropCanvas"></canvas>
     </div>
   </div>
@@ -123,6 +146,9 @@
       <input type="text" id="weightInput" placeholder="0.00" readonly>
       <span style="font-size: 24px; font-weight: bold;">g</span>
     </div>
+
+    <button id="snapBtn" disabled>Načítám OCR...</button>
+
     <div class="status" id="statusText">Inicializace...</div>
   </div>
 
@@ -133,6 +159,7 @@
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const weightInput = document.getElementById('weightInput');
     const statusText = document.getElementById('statusText');
+    const snapBtn = document.getElementById('snapBtn');
 
     let worker = null;
     let isProcessing = false;
@@ -146,116 +173,115 @@
         video.srcObject = stream;
         await video.play();
 
-        statusText.innerText = "Načítám OCR...";
+        statusText.innerText = "Připravuji OCR jádro...";
         worker = await Tesseract.createWorker('eng');
         await worker.setParameters({
-          tessedit_char_whitelist: '0123456789', // Hledáme POUZE čisté číslice
+          tessedit_char_whitelist: '0123456789', // Hledá výhradně čísla
           tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE
         });
 
-        statusText.innerText = "Skenuji displej...";
-        startLoop();
+        statusText.innerText = "Připraveno. Namiřte a stiskněte tlačítko.";
+        snapBtn.innerText = "VYFOTIT A PŘEČÍST";
+        snapBtn.disabled = false;
       } catch (err) {
-        statusText.innerText = "Chyba: " + err.message;
+        statusText.innerText = "Chyba inicializace: " + err.message;
       }
     }
 
-    function startLoop() {
-      setInterval(async () => {
-        if (isProcessing || !worker || video.readyState !== 4) return;
-        isProcessing = true;
-        try {
-          processFrameAndRead();
-        } catch (e) {
-          console.error(e);
-          isProcessing = false;
+    async function captureAndRead() {
+      if (isProcessing || !worker || video.readyState !== 4) return;
+
+      isProcessing = true;
+      snapBtn.disabled = true;
+      snapBtn.innerText = "Čtu displej...";
+      statusText.innerText = "Zpracovávám snímek...";
+
+      try {
+        const vWidth = video.videoWidth;
+        const vHeight = video.videoHeight;
+        const cRect = video.getBoundingClientRect();
+        const rRect = roi.getBoundingClientRect();
+
+        const scaleX = vWidth / cRect.width;
+        const scaleY = vHeight / cRect.height;
+
+        const sx = (rRect.left - cRect.left) * scaleX;
+        const sy = (rRect.top - cRect.top) * scaleY;
+        const sWidth = rRect.width * scaleX;
+        const sHeight = rRect.height * scaleY;
+
+        const w = 280;
+        const h = 70;
+        canvas.width = w;
+        canvas.height = h;
+
+        // Vykreslení ořezu
+        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, w, h);
+
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const data = imgData.data;
+
+        // 1. Prahování: černá čísla = 1, světlé pozadí = 0
+        const bin = new Uint8Array(w * h);
+        const threshold = 115;
+
+        for (let i = 0; i < data.length; i += 4) {
+          const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+          bin[i / 4] = (gray < threshold) ? 1 : 0;
         }
-      }, 350);
-    }
 
-    async function processFrameAndRead() {
-      const vWidth = video.videoWidth;
-      const vHeight = video.videoHeight;
-      const cRect = video.getBoundingClientRect();
-      const rRect = roi.getBoundingClientRect();
+        // 2. Čistě vertikální dilatace (dy = 3 px, dx = 0)
+        // Spojí horní/střední/spodní čárky, ale nechá mezeru mezi číslicemi
+        const dilated = new Uint8Array(w * h);
+        const ry = 3;
 
-      const scaleX = vWidth / cRect.width;
-      const scaleY = vHeight / cRect.height;
-
-      const sx = (rRect.left - cRect.left) * scaleX;
-      const sy = (rRect.top - cRect.top) * scaleY;
-      const sWidth = rRect.width * scaleX;
-      const sHeight = rRect.height * scaleY;
-
-      const w = 260;
-      const h = 65;
-      canvas.width = w;
-      canvas.height = h;
-
-      ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, w, h);
-
-      const imgData = ctx.getImageData(0, 0, w, h);
-      const data = imgData.data;
-
-      // 1. Prahování: černá čísla = 1, zelené pozadí = 0
-      const bin = new Uint8Array(w * h);
-      const threshold = 115;
-
-      for (let i = 0; i < data.length; i += 4) {
-        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-        bin[i / 4] = (gray < threshold) ? 1 : 0;
-      }
-
-      // 2. Všesměrová dilatace (roztažení do všech stran)
-      const dilated = new Uint8Array(w * h);
-      const r = 2; // poloměr roztažení o 2 px do všech směrů
-
-      for (let y = r; y < h - r; y++) {
-        for (let x = r; x < w - r; x++) {
-          if (bin[y * w + x] === 1) {
-            for (let dy = -r; dy <= r; dy++) {
-              for (let dx = -r; dx <= r; dx++) {
-                dilated[(y + dy) * w + (x + dx)] = 1;
+        for (let y = ry; y < h - ry; y++) {
+          for (let x = 0; x < w; x++) {
+            if (bin[y * w + x] === 1) {
+              for (let dy = -ry; dy <= ry; dy++) {
+                dilated[(y + dy) * w + x] = 1;
               }
             }
           }
         }
-      }
 
-      // 3. Vykreslení do canvasu: černé číslice na bílém podkladu
-      for (let i = 0; i < dilated.length; i++) {
-        const isDigit = dilated[i] === 1;
-        const color = isDigit ? 0 : 255;
-        const p = i * 4;
-        data[p] = color;
-        data[p + 1] = color;
-        data[p + 2] = color;
-        data[p + 3] = 255;
-      }
-      ctx.putImageData(imgData, 0, 0);
+        // 3. Vykreslení upraveného obrazu pro Tesseract
+        for (let i = 0; i < dilated.length; i++) {
+          const isDigit = dilated[i] === 1;
+          const color = isDigit ? 0 : 255;
+          const p = i * 4;
+          data[p] = color;
+          data[p + 1] = color;
+          data[p + 2] = color;
+          data[p + 3] = 255;
+        }
+        ctx.putImageData(imgData, 0, 0);
 
-      // 4. Rozpoznání a formátování výsledku
-      try {
+        // 4. OCR vyhodnocení
         const { data: { text } } = await worker.recognize(canvas);
-        // Vytažení pouze čistých číslic
         const digits = text.replace(/\D/g, '');
 
-        // Pokud byly nalezeny alespoň 3 číslice
         if (digits.length >= 3) {
-          // Vezmeme přesně první 3 číslice
           const firstThree = digits.substring(0, 3);
-          
-          // Vložíme tečku hned za první číslici (např. 5 + . + 45 = 5.45)
-          const formattedValue = firstThree[0] + '.' + firstThree.substring(1);
-
-          weightInput.value = formattedValue;
-          statusText.innerText = `Načteno: ${formattedValue} g`;
+          const formatted = firstThree[0] + '.' + firstThree.substring(1);
+          weightInput.value = formatted;
+          statusText.innerText = `Přečteno: ${formatted} g`;
+        } else if (digits.length > 0) {
+          statusText.innerText = `Detekováno málo číslic (${digits}), zkuste znovu.`;
+        } else {
+          statusText.innerText = "Číslice nebyly nalezeny, zkuste zaostřit a kliknout znovu.";
         }
+      } catch (err) {
+        console.error(err);
+        statusText.innerText = "Chyba při čtení: " + err.message;
       } finally {
         isProcessing = false;
+        snapBtn.disabled = false;
+        snapBtn.innerText = "VYFOTIT A PŘEČÍST";
       }
     }
 
+    snapBtn.addEventListener('click', captureAndRead);
     window.addEventListener('load', init);
   </script>
 </body>
