@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Čtečka váhy</title>
+  <title>Morfologické OCR pro váhy</title>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
     body { background: #121212; color: #fff; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
@@ -24,19 +25,19 @@
       object-fit: cover;
     }
 
-    /* Úzký rámeček přesně na zelené pole */
+    /* Úzký rámeček pouze na zelené pole */
     .roi-box {
       position: absolute;
-      width: 230px;
-      height: 60px;
+      width: 220px;
+      height: 55px;
       border: 2px solid #00ff88;
       border-radius: 6px;
-      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.65);
       pointer-events: none;
     }
 
     .roi-box::before {
-      content: 'Namiř pouze na zelený displej s čísly';
+      content: 'Namiř pouze na zelené pole s čísly';
       position: absolute;
       top: -22px;
       left: 0;
@@ -46,6 +47,7 @@
       white-space: nowrap;
     }
 
+    /* Náhled spojených segmentů */
     #preview-container {
       position: absolute;
       bottom: 12px;
@@ -55,6 +57,7 @@
       padding: 3px;
       border-radius: 4px;
       text-align: center;
+      z-index: 5;
     }
 
     #preview-container span {
@@ -111,7 +114,7 @@
     <div class="roi-box" id="roi"></div>
 
     <div id="preview-container">
-      <span>AI VSTUP</span>
+      <span>SPOJENÉ SEGMENTY</span>
       <canvas id="cropCanvas"></canvas>
     </div>
   </div>
@@ -121,7 +124,7 @@
       <input type="text" id="weightInput" placeholder="--.--" readonly>
       <span style="font-size: 24px; font-weight: bold;">g</span>
     </div>
-    <div class="status" id="statusText">Spouštím kameru...</div>
+    <div class="status" id="statusText">Inicializace...</div>
   </div>
 
   <script>
@@ -132,56 +135,46 @@
     const weightInput = document.getElementById('weightInput');
     const statusText = document.getElementById('statusText');
 
+    let worker = null;
     let isProcessing = false;
 
-    // Šablony číslic 0-9 v normalizované mřížce 5x7 (nativní 7-segment)
-    const TEMPLATES = [
-      { d: '0', p: [1,1,1,1,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,1] },
-      { d: '1', p: [0,0,0,1,1, 0,0,0,1,1, 0,0,0,1,1, 0,0,0,1,1, 0,0,0,1,1, 0,0,0,1,1, 0,0,0,1,1] },
-      { d: '2', p: [1,1,1,1,1, 0,0,0,0,1, 0,0,0,0,1, 1,1,1,1,1, 1,0,0,0,0, 1,0,0,0,0, 1,1,1,1,1] },
-      { d: '3', p: [1,1,1,1,1, 0,0,0,0,1, 0,0,0,0,1, 1,1,1,1,1, 0,0,0,0,1, 0,0,0,0,1, 1,1,1,1,1] },
-      { d: '4', p: [1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,1, 0,0,0,0,1, 0,0,0,0,1, 0,0,0,0,1] },
-      { d: '5', p: [1,1,1,1,1, 1,0,0,0,0, 1,0,0,0,0, 1,1,1,1,1, 0,0,0,0,1, 0,0,0,0,1, 1,1,1,1,1] },
-      { d: '6', p: [1,1,1,1,1, 1,0,0,0,0, 1,0,0,0,0, 1,1,1,1,1, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,1] },
-      { d: '7', p: [1,1,1,1,1, 0,0,0,0,1, 0,0,0,0,1, 0,0,0,0,1, 0,0,0,0,1, 0,0,0,0,1, 0,0,0,0,1] },
-      { d: '8', p: [1,1,1,1,1, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,1, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,1] },
-      { d: '9', p: [1,1,1,1,1, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,1, 0,0,0,0,1, 0,0,0,0,1, 1,1,1,1,1] }
-    ];
-
-    async function initCamera() {
+    async function init() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-          },
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false
         });
         video.srcObject = stream;
         await video.play();
-        statusText.innerText = "Namiřte na displej váhy...";
+
+        statusText.innerText = "Načítám OCR model...";
+        worker = await Tesseract.createWorker('eng');
+        await worker.setParameters({
+          tessedit_char_whitelist: '0123456789.,',
+          tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE
+        });
+
+        statusText.innerText = "Skenuji displej...";
         startLoop();
       } catch (err) {
-        statusText.innerText = "Chyba kamery: " + err.message;
+        statusText.innerText = "Chyba: " + err.message;
       }
     }
 
     function startLoop() {
-      setInterval(() => {
-        if (isProcessing || video.readyState !== 4) return;
+      setInterval(async () => {
+        if (isProcessing || !worker || video.readyState !== 4) return;
         isProcessing = true;
         try {
-          processFrame();
+          processFrameAndRead();
         } catch (e) {
           console.error(e);
-        } finally {
           isProcessing = false;
         }
-      }, 100); // 10 FPS
+      }, 400);
     }
 
-    function processFrame() {
+    async function processFrameAndRead() {
       const vWidth = video.videoWidth;
       const vHeight = video.videoHeight;
       const cRect = video.getBoundingClientRect();
@@ -195,137 +188,71 @@
       const sWidth = rRect.width * scaleX;
       const sHeight = rRect.height * scaleY;
 
-      canvas.width = 240;
-      canvas.height = 65;
+      // Normalizovaná velikost pro morfologický filtr
+      const w = 260;
+      const h = 65;
+      canvas.width = w;
+      canvas.height = h;
 
-      ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, w, h);
 
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const imgData = ctx.getImageData(0, 0, w, h);
       const data = imgData.data;
 
-      // Prahování pro zelený LCD: tmavé segmenty = 1, světlé zelené pozadí = 0
-      const binary = new Uint8Array(canvas.width * canvas.height);
-      const threshold = 110;
+      // 1. Prahování: černá čísla = 1, pozadí = 0
+      const bin = new Uint8Array(w * h);
+      const threshold = 115;
 
       for (let i = 0; i < data.length; i += 4) {
         const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-        const isDark = gray < threshold ? 1 : 0;
-        const idx = i / 4;
-        binary[idx] = isDark;
+        bin[i / 4] = (gray < threshold) ? 1 : 0;
+      }
 
-        // V náhledu: tmavý segment černě, pozadí bíle
-        const val = isDark ? 0 : 255;
-        data[i] = val;
-        data[i + 1] = val;
-        data[i + 2] = val;
+      // 2. Morfologická dilatace (roztažení černých linek, aby se segmenty spojily)
+      const dilated = new Uint8Array(w * h);
+      const r = 2; // poloměr roztažení pixelů
+
+      for (let y = r; y < h - r; y++) {
+        for (let x = r; x < w - r; x++) {
+          if (bin[y * w + x] === 1) {
+            for (let dy = -r; dy <= r; dy++) {
+              for (let dx = -r; dx <= r; dx++) {
+                dilated[(y + dy) * w + (x + dx)] = 1;
+              }
+            }
+          }
+        }
+      }
+
+      // 3. Vykreslení výsledku do canvasu: bílé pozadí, plné černé spojené číslice
+      for (let i = 0; i < dilated.length; i++) {
+        const isDigit = dilated[i] === 1;
+        const color = isDigit ? 0 : 255;
+        const p = i * 4;
+        data[p] = color;
+        data[p + 1] = color;
+        data[p + 2] = color;
+        data[p + 3] = 255;
       }
       ctx.putImageData(imgData, 0, 0);
 
-      // Vertikální projekce
-      const colCounts = new Array(canvas.width).fill(0);
-      for (let x = 0; x < canvas.width; x++) {
-        let count = 0;
-        for (let y = 6; y < canvas.height - 6; y++) {
-          if (binary[y * canvas.width + x] === 1) count++;
+      // 4. Předání spojeného obrazu do Tesseractu
+      try {
+        const { data: { text } } = await worker.recognize(canvas);
+        let raw = text.replace(/[^0-9.,]/g, '').trim().replace(',', '.');
+
+        const match = raw.match(/\d+(\.\d+)?/);
+        if (match) {
+          const val = match[0];
+          weightInput.value = val;
+          statusText.innerText = `Úspěšně načteno: ${val} g`;
         }
-        colCounts[x] = count;
-      }
-
-      // Hledání bloků
-      const blocks = [];
-      let inBlock = false;
-      let startX = 0;
-
-      for (let x = 6; x < canvas.width - 6; x++) {
-        if (colCounts[x] >= 3) {
-          if (!inBlock) {
-            inBlock = true;
-            startX = x;
-          }
-        } else {
-          if (inBlock) {
-            inBlock = false;
-            const w = x - startX;
-            if (w >= 3) blocks.push({ x: startX, w: w });
-          }
-        }
-      }
-
-      if (blocks.length === 0) return;
-
-      let detected = '';
-
-      for (let b of blocks) {
-        // Ignorovat jednotku 'g' vpravo
-        if (b.x > canvas.width * 0.82 && b.w < 15) continue;
-
-        // Desetinná tečka: úzký blok dole
-        if (b.w <= 10) {
-          let dotScore = 0;
-          for (let y = Math.floor(canvas.height * 0.65); y < canvas.height - 6; y++) {
-            for (let x = b.x; x < b.x + b.w; x++) {
-              if (binary[y * canvas.width + x] === 1) dotScore++;
-            }
-          }
-          if (dotScore >= 3) detected += '.';
-          continue;
-        }
-
-        // Číslice: porovnání s mřížkou 5x7
-        const digit = matchDigit(binary, canvas.width, canvas.height, b.x, b.w);
-        if (digit !== null) {
-          detected += digit;
-        }
-      }
-
-      // Validace čísla (např. 93.91)
-      if (detected.length >= 2 && !isNaN(parseFloat(detected))) {
-        weightInput.value = detected;
-        statusText.innerText = "Načteno: " + detected + " g";
+      } finally {
+        isProcessing = false;
       }
     }
 
-    function matchDigit(bin, imgW, imgH, bx, bw) {
-      // Vzorkování do 5x7 pole
-      const sample = new Array(35).fill(0);
-      const startY = 8;
-      const h = imgH - 16;
-
-      for (let row = 0; row < 7; row++) {
-        for (let col = 0; col < 5; col++) {
-          const px = Math.floor(bx + (col + 0.5) * (bw / 5));
-          const py = Math.floor(startY + (row + 0.5) * (h / 7));
-          
-          let hits = 0;
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              if (bin[(py + dy) * imgW + (px + dx)] === 1) hits++;
-            }
-          }
-          sample[row * 5 + col] = hits >= 4 ? 1 : 0;
-        }
-      }
-
-      // Výpočet podobnosti se šablonami
-      let bestScore = -1;
-      let bestMatch = null;
-
-      for (let t of TEMPLATES) {
-        let score = 0;
-        for (let i = 0; i < 35; i++) {
-          if (sample[i] === t.p[i]) score++;
-        }
-        if (score > bestScore) {
-          bestScore = score;
-          bestMatch = t.d;
-        }
-      }
-
-      // Prah spolehlivosti (alespoň 75% shoda pixelů)
-      return (bestScore >= 26) ? bestMatch : null;
-    }
-
-    window.addEventListener('load', initCamera);
+    window.addEventListener('load', init);
   </script>
 </body>
 </html>
