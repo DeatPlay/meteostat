@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Morfologické OCR (Vertikální dilatace)</title>
+  <title>Čtečka váhy (Auto-tečka)</title>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
@@ -25,9 +25,10 @@
       object-fit: cover;
     }
 
+    /* Rámeček zaměřený pouze na zelený displej */
     .roi-box {
       position: absolute;
-      width: 230px;
+      width: 220px;
       height: 55px;
       border: 2px solid #00ff88;
       border-radius: 6px;
@@ -66,7 +67,7 @@
     }
 
     #cropCanvas {
-      width: 130px;
+      width: 120px;
       height: auto;
       display: block;
     }
@@ -112,14 +113,14 @@
     <div class="roi-box" id="roi"></div>
 
     <div id="preview-container">
-      <span>VERTIKÁLNĚ SPOJENO</span>
+      <span>UPRAVENÝ OBRAZ</span>
       <canvas id="cropCanvas"></canvas>
     </div>
   </div>
 
   <div id="control-panel">
     <div class="output-group">
-      <input type="text" id="weightInput" placeholder="--.--" readonly>
+      <input type="text" id="weightInput" placeholder="0.00" readonly>
       <span style="font-size: 24px; font-weight: bold;">g</span>
     </div>
     <div class="status" id="statusText">Inicializace...</div>
@@ -145,10 +146,10 @@
         video.srcObject = stream;
         await video.play();
 
-        statusText.innerText = "Načítám OCR model...";
+        statusText.innerText = "Načítám OCR...";
         worker = await Tesseract.createWorker('eng');
         await worker.setParameters({
-          tessedit_char_whitelist: '0123456789.,',
+          tessedit_char_whitelist: '0123456789', // Hledáme POUZE čisté číslice
           tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE
         });
 
@@ -169,7 +170,7 @@
           console.error(e);
           isProcessing = false;
         }
-      }, 400);
+      }, 350);
     }
 
     async function processFrameAndRead() {
@@ -186,9 +187,8 @@
       const sWidth = rRect.width * scaleX;
       const sHeight = rRect.height * scaleY;
 
-      // Zvýšené rozlišení (300x75) pomáhá udržet tečku zřetelnou
-      const w = 300;
-      const h = 75;
+      const w = 260;
+      const h = 65;
       canvas.width = w;
       canvas.height = h;
 
@@ -197,7 +197,7 @@
       const imgData = ctx.getImageData(0, 0, w, h);
       const data = imgData.data;
 
-      // 1. Prahování: černá čísla = 1, světlé pozadí = 0
+      // 1. Prahování: černá čísla = 1, zelené pozadí = 0
       const bin = new Uint8Array(w * h);
       const threshold = 115;
 
@@ -206,27 +206,26 @@
         bin[i / 4] = (gray < threshold) ? 1 : 0;
       }
 
-      // 2. Čistě vertikální dilatace:
-      // ry = 3 (spojí vertikální mezery mezi segmenty)
-      // rx = 0 (nulové horizontální roztažení -> zachová mezery kolem tečky)
+      // 2. Všesměrová dilatace (roztažení do všech stran)
       const dilated = new Uint8Array(w * h);
-      const ry = 3;
-      const rx = 0;
+      const r = 2; // poloměr roztažení o 2 px do všech směrů
 
-      for (let y = ry; y < h - ry; y++) {
-        for (let x = 0; x < w; x++) {
+      for (let y = r; y < h - r; y++) {
+        for (let x = r; x < w - r; x++) {
           if (bin[y * w + x] === 1) {
-            for (let dy = -ry; dy <= ry; dy++) {
-              dilated[(y + dy) * w + x] = 1;
+            for (let dy = -r; dy <= r; dy++) {
+              for (let dx = -r; dx <= r; dx++) {
+                dilated[(y + dy) * w + (x + dx)] = 1;
+              }
             }
           }
         }
       }
 
-      // 3. Vykreslení upraveného obrazu pro OCR
+      // 3. Vykreslení do canvasu: černé číslice na bílém podkladu
       for (let i = 0; i < dilated.length; i++) {
-        const isBlack = dilated[i] === 1;
-        const color = isBlack ? 0 : 255;
+        const isDigit = dilated[i] === 1;
+        const color = isDigit ? 0 : 255;
         const p = i * 4;
         data[p] = color;
         data[p + 1] = color;
@@ -235,17 +234,22 @@
       }
       ctx.putImageData(imgData, 0, 0);
 
-      // 4. Detekce a zpracování v Tesseractu
+      // 4. Rozpoznání a formátování výsledku
       try {
         const { data: { text } } = await worker.recognize(canvas);
-        let raw = text.replace(/[^0-9.,]/g, '').trim().replace(',', '.');
+        // Vytažení pouze čistých číslic
+        const digits = text.replace(/\D/g, '');
 
-        // Regex pro číslo s desetinnou tečkou
-        const match = raw.match(/\d+(\.\d+)?/);
-        if (match) {
-          const val = match[0];
-          weightInput.value = val;
-          statusText.innerText = `Úspěšně načteno: ${val} g`;
+        // Pokud byly nalezeny alespoň 3 číslice
+        if (digits.length >= 3) {
+          // Vezmeme přesně první 3 číslice
+          const firstThree = digits.substring(0, 3);
+          
+          // Vložíme tečku hned za první číslici (např. 5 + . + 45 = 5.45)
+          const formattedValue = firstThree[0] + '.' + firstThree.substring(1);
+
+          weightInput.value = formattedValue;
+          statusText.innerText = `Načteno: ${formattedValue} g`;
         }
       } finally {
         isProcessing = false;
